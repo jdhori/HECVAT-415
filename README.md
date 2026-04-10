@@ -9,14 +9,17 @@
 
 ```
 HECVAT-415/
-├── index.html   — Open this file in your browser to use the form
-├── hecvat-data.js    — Question data (332 questions from HECVAT 4.1.5 xlsx)
-├── hecvat-app.js     — Application logic
-└── hecvat.css        — Stylesheet
+├── index.html         — Open this file in your browser to use the form
+├── hecvat-data.js     — Question data (332 questions from HECVAT 4.1.5 xlsx)
+├── hecvat-app.js      — Application logic
+├── hecvat.css         — Stylesheet
+├── hecvat-worker.js   — Web Worker for isolated XLSX import parsing
+└── xlsx.mini.min.js   — SheetJS library (loaded by the worker)
 ```
 
-All four files must stay in the **same folder**. The HTML file references the
-other three by relative path, so moving them apart will break the tool.
+All six files must stay in the **same folder**. The HTML file references the
+others by relative path, and `hecvat-worker.js` loads `xlsx.mini.min.js` via
+`importScripts`, so moving any of them apart will break the tool.
 
 ---
 
@@ -360,7 +363,7 @@ Every server configuration sets these headers:
 
 ### Deployment on Netlify or Cloudflare Pages
 
-1. Copy the four tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`) and the `_headers` file into your repository root.
+1. Copy the six tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`, `hecvat-worker.js`, `xlsx.mini.min.js`) and the `_headers` file into your repository root.
 2. Set your publish directory to the repository root.
 3. Deploy. Both platforms automatically apply the `_headers` file.
 
