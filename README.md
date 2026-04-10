@@ -9,7 +9,7 @@
 
 ```
 HECVAT-415/
-├── HECVAT-415.html   — Open this file in your browser to use the form
+├── index.html   — Open this file in your browser to use the form
 ├── hecvat-data.js    — Question data (332 questions from HECVAT 4.1.5 xlsx)
 ├── hecvat-app.js     — Application logic
 └── hecvat.css        — Stylesheet
@@ -23,7 +23,7 @@ other three by relative path, so moving them apart will break the tool.
 ## Getting Started
 
 1. **Unzip** the archive into a folder on your computer.
-2. **Open `HECVAT-415.html`** in a modern browser — Chrome, Firefox, Edge, or
+2. **Open `index.html`** in a modern browser — Chrome, Firefox, Edge, or
    Safari. No internet connection, server, or installation required.
 3. Begin on the **Start Here** section. Your answers to the Required Questions
    there determine which other sections apply to your product.
@@ -330,7 +330,7 @@ authoritative guidance on question interpretation and submission requirements.
 
 ## Hosted Deployment Guide
 
-This tool is designed to run as a local file (`file://`) but can be hosted on a web server. When hosted, you **must** serve the security headers as HTTP response headers — the `<meta>` tags in `HECVAT-415.html` are a fallback, but HTTP headers provide stronger and more reliable enforcement.
+This tool is designed to run as a local file (`file://`) but can be hosted on a web server. When hosted, you **must** serve the security headers as HTTP response headers — the `<meta>` tags in `index.html` are a fallback, but HTTP headers provide stronger and more reliable enforcement.
 
 ### Server configuration files
 
@@ -360,7 +360,7 @@ Every server configuration sets these headers:
 
 ### Deployment on Netlify or Cloudflare Pages
 
-1. Copy the four tool files (`HECVAT-415.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`) and the `_headers` file into your repository root.
+1. Copy the four tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`) and the `_headers` file into your repository root.
 2. Set your publish directory to the repository root.
 3. Deploy. Both platforms automatically apply the `_headers` file.
 

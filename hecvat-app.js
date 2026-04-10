@@ -36,13 +36,13 @@
    5. Clear & Reset            — wipes both localStorage AND
       sessionStorage keys, then reloads.
 
-   6. CSP                      — HECVAT-415.html carries a <meta>
+   6. CSP                      — index.html carries a <meta>
       CSP.  If hosted on a web server, the same policy should be
       delivered as an HTTP Content-Security-Policy response header
       for stronger enforcement (meta CSP cannot cover all cases and
       is easier to bypass in some browser configurations).
       Current policy: no eval, no inline scripts/styles, no external
-      origins, no framing.  See HECVAT-415.html and the server
+      origins, no framing.  See index.html and the server
       configuration guide in README.md.
    ============================================================ */
 

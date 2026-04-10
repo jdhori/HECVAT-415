@@ -12,11 +12,11 @@ hecvat.yourdomain.edu {
     file_server
 
     # Default page
-    try_files {path} HECVAT-415.html
+    try_files {path} index.html
 
     # ── Security headers ──────────────────────────────────────────────
     # These HTTP headers take precedence over the equivalent <meta> tags
-    # in HECVAT-415.html and provide stronger enforcement.
+    # in index.html and provide stronger enforcement.
 
     header {
         # Content Security Policy
