@@ -1,0 +1,41 @@
+# HECVAT 4.1.5 — Netlify / Cloudflare Pages headers file
+#
+# Place this file at the ROOT of your published site (same level as
+# HECVAT-415.html).  It is automatically picked up by both:
+#   - Netlify (https://docs.netlify.com/routing/headers/)
+#   - Cloudflare Pages (https://developers.cloudflare.com/pages/configuration/headers/)
+#
+# These HTTP headers take precedence over the equivalent <meta> tags
+# in HECVAT-415.html and provide stronger enforcement.
+
+/*
+  # Content Security Policy
+  # Mirrors the meta-tag CSP in HECVAT-415.html exactly.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';
+
+  # Clickjacking protection (complements frame-ancestors in CSP)
+  X-Frame-Options: DENY
+
+  # Prevent MIME-type sniffing
+  X-Content-Type-Options: nosniff
+
+  # No referrer information sent on navigation
+  Referrer-Policy: no-referrer
+
+  # Restrict browser feature APIs
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()
+
+  # HSTS — tells browsers to only use HTTPS for 1 year
+  # Netlify and Cloudflare Pages serve over HTTPS by default, so this is safe to enable.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# Prevent HTML from being cached (ensures users always get the latest version)
+/*.html
+  Cache-Control: no-store
+
+# Allow JS and CSS to be cached for 1 hour
+/*.js
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/*.css
+  Cache-Control: public, max-age=3600, must-revalidate

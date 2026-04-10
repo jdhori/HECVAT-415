@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    Security headers — delivered as <meta> tags for file:// and basic HTTP use.
+    When hosting on a web server these should ALSO be sent as HTTP response
+    headers; HTTP headers take precedence and cover cases meta tags cannot
+    (e.g. early preload requests, browser quirks).  See server-configs/ folder.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta name="referrer" content="no-referrer">
+  <!-- X-Frame-Options and Strict-Transport-Security cannot be set via meta tags;
+       they must be HTTP response headers — see server-configs/          -->
+  <title>HECVAT 4.1.5 &mdash; Higher Education Community Vendor Assessment Toolkit</title>
+  <link rel="stylesheet" href="hecvat.css">
+</head>
+<body>
+
+  <a href="#main" class="skip">Skip to main content</a>
+
+  <header role="banner">
+    <div class="hdr">
+      <div class="logo">
+        <div class="logo-name">HECVAT</div>
+        <div class="logo-ver">Version 4.1.5</div>
+      </div>
+      <div class="hdr-title">
+        <h1>Higher Education Community Vendor Assessment Toolkit</h1>
+        <p>Solution Provider Response &mdash; EDUCAUSE &copy; 2025</p>
+      </div>
+      <div class="hdr-date" id="hdr-date" aria-label="Today's date"></div>
+
+      <!-- Display controls: dark mode + font size — in header for persistent access -->
+      <div class="hdr-controls" role="toolbar" aria-label="Display settings">
+        <button class="hdr-ctrl-btn" id="btn-theme" type="button"
+                aria-pressed="false"
+                aria-label="Toggle dark mode">🌙</button>
+        <div class="hdr-ctrl-sep" aria-hidden="true"></div>
+        <button class="hdr-ctrl-btn" id="btn-fz-down" type="button"
+                aria-label="Decrease font size" title="Decrease font size">A−</button>
+        <span class="hdr-fz-display" id="fz-display" aria-live="polite" aria-label="Current font size">100%</span>
+        <button class="hdr-ctrl-btn" id="btn-fz-up" type="button"
+                aria-label="Increase font size" title="Increase font size">A+</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="sbar" role="status" aria-live="polite" aria-label="Running score summary">
+    <div class="sbar-in">
+      <div class="si">
+        <span class="si-l">Score</span>
+        <span class="si-v">
+          <span id="sb-s">0/0</span><span class="pct" id="sb-p">--</span>
+        </span>
+      </div>
+      <div class="si">
+        <span class="si-l">Answered</span>
+        <span class="si-v"><span id="sb-a">0</span>/<span id="sb-t">0</span></span>
+      </div>
+      <div class="si">
+        <span class="si-l">Compliant</span>
+        <span class="si-v si-compliant" id="sb-c">0</span>
+      </div>
+      <div class="si">
+        <span class="si-l">Non-Compliant</span>
+        <span class="si-v si-noncompliant" id="sb-nc">0</span>
+      </div>
+      <div class="si">
+        <span class="si-l">Critical Issues</span>
+        <span class="si-v si-critical" id="sb-ci">0</span>
+      </div>
+      <button class="btn btn-gd btn-sum-action"
+              id="btn-sum"
+              aria-label="View assessment summary">
+        Summary &rarr;
+      </button>
+    </div>
+  </div>
+
+  <div class="wrap">
+
+    <aside aria-label="Section navigation">
+      <nav class="snav" id="snav" aria-label="HECVAT sections">
+        <h2 class="snav-hd" id="snav-hd-vendor">Vendor Response</h2>
+        <div class="snav-bar" aria-hidden="true">
+          <div class="snav-fill" id="overall-fill"></div>
+        </div>
+        <!-- Vendor nav buttons injected by hecvat-app.js -->
+      </nav>
+
+      <nav class="snav snav-eval" id="snav-eval" aria-label="Analyst evaluation sections">
+        <h2 class="snav-hd snav-hd-eval" id="snav-hd-eval">Analyst Evaluations</h2>
+        <!-- Eval nav buttons injected by hecvat-app.js -->
+      </nav>
+
+      <div class="side-btns">
+        <button class="btn btn-nv" id="btn-save" aria-label="Save encrypted progress to browser storage">
+          Save Progress
+        </button>
+        <button class="btn btn-ol" id="btn-load" aria-label="Load previously saved progress from browser storage">
+          Load Progress
+        </button>
+        <button class="btn btn-gd" id="btn-exp" aria-label="Export all responses as JSON file">
+          Export JSON
+        </button>
+        <button class="btn btn-ol" id="btn-csv" aria-label="Export all responses as CSV file">
+          Export CSV
+        </button>
+        <button class="btn btn-ol" id="btn-exp-xlsx" aria-label="Export all responses as a completed HECVAT Excel spreadsheet">
+          Export XLSX
+        </button>
+        <button class="btn btn-ol" id="btn-imp-json" aria-label="Import responses from a previously exported JSON file">
+          Import JSON
+        </button>
+        <button class="btn btn-ol" id="btn-imp-csv" aria-label="Import responses from a previously exported CSV file">
+          Import CSV
+        </button>
+        <button class="btn btn-ol" id="btn-imp-xlsx" aria-label="Import responses from an official HECVAT Excel spreadsheet">
+          Import XLSX
+        </button>
+        <button class="btn btn-ol" id="btn-prt" aria-label="Print this assessment form">
+          Print
+        </button>
+        <button class="btn btn-danger" id="btn-clear" aria-label="Clear all saved progress and responses from browser storage">
+          Clear &amp; Reset
+        </button>
+
+      </div>
+
+      <!-- Storage status indicator -->
+      <div id="storage-status" role="status" aria-live="polite" class="storage-status"></div>
+    </aside>
+    </aside>
+
+    <main id="main" tabindex="-1" aria-label="Assessment form sections"></main>
+
+  </div>
+
+  <!-- SheetJS — local bundle for XLSX parsing, no external network request -->
+  <script src="xlsx.mini.min.js"></script>
+  <!-- Data must load before app logic -->
+  <script src="hecvat-data.js"></script>
+  <script src="hecvat-app.js"></script>
+
+</body>
+</html>
