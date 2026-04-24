@@ -2145,7 +2145,13 @@ var HECVAT_SEC = (function () {
 
     /* Left column */
     var L = mk('div');
-    var meta = mk('div', 'qmeta'); meta.appendChild(txt(q.id));
+    /* qmeta is given an ID so the Reason / Follow-up toggle below can
+       reference it via aria-labelledby — that makes the toggle's
+       accessible name include the question ID (e.g. "AAAI-01"),
+       so screen-reader users can tell the otherwise-identical
+       "+ Reason / Follow-up" buttons apart. */
+    var metaId = 'aqmeta-' + evalId + '-' + q.id;
+    var meta = mk('div', 'qmeta'); meta.id = metaId; meta.appendChild(txt(q.id));
     if (crit) { var bc = mk('span','bdg bdg-c'); bc.textContent='\u2605 Critical'; meta.appendChild(bc); }
     L.appendChild(meta);
     var qt = mk('div','qtext'); qt.id='aqt-'+evalId+'-'+q.id; qt.appendChild(txt(q.q)); L.appendChild(qt);
@@ -2163,7 +2169,18 @@ var HECVAT_SEC = (function () {
       attr(rtog,'aria-expanded','false');
       attr(rtog,'aria-controls','reason-'+evalId+'-'+q.id);
       attr(rtog,'data-reason-for', evalId+'-'+q.id);
-      rtog.appendChild(txt('+ Reason / Follow-up')); L.appendChild(rtog);
+      /* Accessible name = [the button's own "+ Reason / Follow-up" span]
+         + [the qmeta div with the question ID and critical badge]. The
+         browser concatenates the referenced text, so a screen reader
+         announces e.g. "Plus Reason / Follow-up, AAAI-01 Critical,
+         button, collapsed". That ID disambiguates every toggle on the
+         page. */
+      var rtogLblId = 'rtog-lbl-' + evalId + '-' + q.id;
+      attr(rtog, 'aria-labelledby', rtogLblId + ' ' + metaId);
+      var rtogLbl = mk('span'); rtogLbl.id = rtogLblId;
+      rtogLbl.appendChild(txt('+ Reason / Follow-up'));
+      rtog.appendChild(rtogLbl);
+      L.appendChild(rtog);
       var rarea = mk('div','reason-area'); rarea.id='reason-'+evalId+'-'+q.id;
       if (q.reason)  { var rh=mk('strong'); rh.appendChild(txt('Reason for Question')); rarea.appendChild(rh); rarea.appendChild(txt(q.reason)); }
       if (q.followup){ var fh=mk('strong'); fh.appendChild(txt('Follow-up Guidance')); rarea.appendChild(fh); rarea.appendChild(txt(q.followup)); }
