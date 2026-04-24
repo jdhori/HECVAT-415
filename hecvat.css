@@ -635,12 +635,36 @@ textarea { resize: vertical; min-height: 70px; }
   align-items: center;
   justify-content: center;
   gap: .22rem;
+  position: relative;
   /* Question label is in aria-label — visually we show only icon+word */
 }
 .ynb:hover     { background: var(--g1); }
-.ynb.sel-y     { background: var(--green-bg); border-color: var(--green); color: var(--green); }
-.ynb.sel-n     { background: var(--red-bg);   border-color: var(--red);   color: var(--red); }
-.ynb.sel-na    { background: var(--g1);        border-color: var(--g3);    color: var(--g4); }
+/* Selected state — high contrast, bold, filled background, inset ring, check mark */
+.ynb.sel-y,
+.ynb.sel-n,
+.ynb.sel-na {
+  color: #fff;
+  font-weight: 800;
+  border-width: 2px;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.08) inset, 0 2px 4px rgba(0,0,0,.15);
+  transform: translateY(-1px);
+}
+.ynb.sel-y  { background: var(--green); border-color: var(--green); }
+.ynb.sel-n  { background: var(--red);   border-color: var(--red); }
+.ynb.sel-na { background: var(--g4);    border-color: var(--g4); }
+/* Selected marker pip in the top-right corner for extra clarity */
+.ynb.sel-y::after,
+.ynb.sel-n::after,
+.ynb.sel-na::after {
+  content: "\2713";
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: .65rem;
+  line-height: 1;
+  color: #fff;
+  opacity: .85;
+}
 
 /* ── Compliance indicator ── */
 .cind { font-size: .67rem; font-weight: 700; padding: .16rem .42rem; border-radius: 3px; margin-top: .3rem; display: none; }
@@ -1073,6 +1097,58 @@ h2.snav-hd-eval { background: #1e3a5f; }
 .ie-expand-bar { padding: .4rem 1.5rem; display: flex; gap: .5rem; }
 
 /* ================================================================
+   SECONDARY QUESTION INSTANCES (multi-section) + SYNC CHECKBOX
+================================================================ */
+.qrow-sec { background: #fafaf6; border-left: 3px solid var(--navy2); }
+.qrow-sec.unlinked { border-left-color: var(--amber, #b58900); background: #fffaf0; }
+.ref-src-tag {
+  display: inline-block;
+  font-size: .65rem;
+  font-weight: 600;
+  padding: .1rem .4rem;
+  margin-left: .3rem;
+  border-radius: 3px;
+  background: var(--navy2);
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.qrow-sec.unlinked .ref-src-tag { background: var(--amber, #b58900); }
+.sync-wrap {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin-top: .5rem;
+  padding: .35rem .55rem;
+  background: rgba(0,0,0,.03);
+  border-radius: 3px;
+  font-size: .72rem;
+}
+.sync-cb { margin: 0; cursor: pointer; }
+.sync-lbl { cursor: pointer; color: var(--text2); user-select: none; }
+.qrow-sec.unlinked .sync-wrap { background: rgba(181, 137, 0, .12); }
+.qrow-sec.unlinked .sync-lbl { color: var(--amber, #b58900); font-weight: 600; }
+[data-theme="dark"] .qrow-sec { background: var(--g2); border-left-color: var(--gold2); }
+[data-theme="dark"] .qrow-sec.unlinked { background: #2d2410; border-left-color: var(--gold2); }
+[data-theme="dark"] .sync-wrap { background: rgba(255,255,255,.04); }
+[data-theme="dark"] .sync-lbl { color: var(--text2); }
+
+/* ================================================================
+   STATISTICAL METHODS REFERENCE PANEL (Institution Evaluation)
+================================================================ */
+.stat-methods-ref { margin: .6rem 1.5rem 1rem 1.5rem; }
+.stat-methods-body { padding: .9rem 1.2rem 1.1rem 1.2rem; background: var(--g1); border-left: 3px solid var(--navy2); }
+.stat-intro { font-size: .82rem; line-height: 1.5; margin: 0 0 .7rem 0; color: var(--text); }
+.stat-methods-list { margin: 0; padding: 0; }
+.stat-methods-list dt { font-weight: 700; font-size: .78rem; margin-top: .55rem; color: var(--navy2); }
+.stat-methods-list dt:first-child { margin-top: 0; }
+.stat-methods-list dd { margin: .2rem 0 0 0; font-size: .78rem; line-height: 1.5; color: var(--text2); }
+[data-theme="dark"] .stat-methods-body { background: var(--g2); border-left-color: var(--gold2); }
+[data-theme="dark"] .stat-methods-list dt { color: var(--gold2); }
+[data-theme="dark"] .stat-intro { color: var(--text); }
+[data-theme="dark"] .stat-methods-list dd { color: var(--text2); }
+
+/* ================================================================
    DARK THEME OVERRIDES & LEGIBILITY FIXES
 ================================================================ */
 
@@ -1115,9 +1191,12 @@ h2.snav-hd-eval { background: #1e3a5f; }
 /* Yes/No/NA buttons */
 [data-theme="dark"] .ynb          { background: var(--input-bg); border-color: var(--input-bdr); color: var(--text2); }
 [data-theme="dark"] .ynb:hover    { background: var(--g2); }
-[data-theme="dark"] .ynb.sel-y    { background: var(--green-bg); border-color: var(--green); color: var(--green); }
-[data-theme="dark"] .ynb.sel-n    { background: var(--red-bg);   border-color: var(--red);   color: var(--red);   }
-[data-theme="dark"] .ynb.sel-na   { background: var(--g2);       border-color: var(--g3);    color: var(--g4);    }
+[data-theme="dark"] .ynb.sel-y    { background: var(--green); border-color: var(--green); color: #0b1b12; }
+[data-theme="dark"] .ynb.sel-n    { background: var(--red);   border-color: var(--red);   color: #1b0b0b; }
+[data-theme="dark"] .ynb.sel-na   { background: var(--g4);    border-color: var(--g4);    color: #0f0f10; }
+[data-theme="dark"] .ynb.sel-y::after,
+[data-theme="dark"] .ynb.sel-n::after,
+[data-theme="dark"] .ynb.sel-na::after { color: rgba(0,0,0,.7); }
 
 /* Analyst selects */
 [data-theme="dark"] .analyst-select {

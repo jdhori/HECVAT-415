@@ -260,10 +260,14 @@ var HECVAT_SEC = (function () {
   /* ================================================================
      STATE
   ================================================================ */
-  var R = {};                  // responses: { qid: { value, notes } }
+  var R = {};                  // responses: { qid: { value, notes } }  (primary / shared value)
+  var RS = {};                 // per-section overrides when a secondary instance is UNLINKED
+                               //   key = secId + ':' + qid  →  { value, notes }
   var AE = {};                 // analyst evaluations: { qid: { impOverride, compOverride, nonNeg, analystNotes } }
-  var renderedIn = {};         // qid -> first secId rendered as full input
-  var xrefRegistry = [];       // [{ qid, el }] live cross-ref display elements
+  var renderedIn = {};         // qid -> first secId rendered (authoritative for scoring)
+  var xrefRegistry = [];       // [{ qid, el }] live cross-ref display elements (unused now — kept for compat)
+  var secondaryReg = {};       // qid -> [ { secId, linked, updateUI(val), updateNotes(n) } ]
+                               //   secondary instances that render a full input in other sections
 
   /* ================================================================
      DOM HELPERS
@@ -368,48 +372,359 @@ var HECVAT_SEC = (function () {
   }
 
   /* ================================================================
-     BUILD CROSS-REFERENCE ROW (for questions already rendered elsewhere)
+     BUILD SECONDARY QUESTION INSTANCE
+     Rendered when a question's q.sections contains more than one section
+     and this is NOT the primary (first) section.  Each instance gets its
+     own answerable input plus a "Sync answer with other sections"
+     checkbox (default checked).  When linked, edits propagate through
+     R[qid] to the primary and other linked instances.  When unlinked,
+     edits are stored in RS[secId+':'+qid] and do not affect scoring.
   ================================================================ */
-  function buildQRef(q, primarySecId) {
-    var row = mk('div', 'qrow qrow-ref');
-    /* Unique ID: question id + current section context */
-    row.id = 'qrow-ref-' + q.id;
+  function buildQSecondary(q, secId, primarySecId) {
+    var key = secId + ':' + q.id;
 
-    /* Left: question text */
+    /* Default: linked (shares master answer).  Per-instance link state
+       is tracked on the DOM via aria-pressed on the checkbox, and the
+       logical state by whether RS[key] exists and has an override flag. */
+    var rec = RS[key] || null;
+    var linked = !(rec && rec.unlinked);
+
+    var crit   = q.imp === 'Critical Importance';
+
+    var row = mk('div', 'qrow qrow-sec' + (crit ? ' crit' : ''));
+    row.id = 'qrow-' + secId + '-' + q.id;
+    attr(row, 'data-qid', q.id);
+    attr(row, 'data-sec', secId);
+
+    /* Left column — question meta + text + guidance */
     var L = mk('div');
     var meta = mk('div', 'qmeta');
-    meta.appendChild(txt(q.id + ' '));
+    meta.appendChild(txt(q.id));
+    if (q.imp === 'Critical Importance') {
+      var bc = mk('span', 'bdg bdg-c'); bc.textContent = '\u2605 Critical'; meta.appendChild(bc);
+    } else if (q.imp === 'Standard Importance') {
+      var bs = mk('span', 'bdg bdg-s'); bs.textContent = 'Standard'; meta.appendChild(bs);
+    } else if (q.imp === 'Minor Importance') {
+      var bm = mk('span', 'bdg bdg-m'); bm.textContent = 'Minor'; meta.appendChild(bm);
+    }
     var srcTag = mk('span', 'ref-src-tag');
-    srcTag.appendChild(txt('Answered in ' + getSecLabel(primarySecId)));
+    srcTag.appendChild(txt('Also in ' + getSecLabel(primarySecId)));
     meta.appendChild(srcTag);
     L.appendChild(meta);
 
-    var qt = mk('div', 'qtext'); qt.appendChild(txt(q.q)); L.appendChild(qt);
+    var qt = mk('div', 'qtext'); qt.id = 'qt-' + secId + '-' + q.id; qt.appendChild(txt(q.q)); L.appendChild(qt);
+
+    if (q.guide) {
+      var g = mk('div', 'qguide'); attr(g, 'role', 'note');
+      g.id = 'guide-' + secId + '-' + q.id;
+      var gIcon = mk('span', 'cg-icon'); attr(gIcon, 'aria-hidden', 'true');
+      gIcon.textContent = '\uD83D\uDCA1';
+      g.appendChild(gIcon); g.appendChild(txt(q.guide));
+      L.appendChild(g);
+    }
+
+    /* Sync checkbox — controls whether this instance mirrors R[qid] */
+    var syncWrap = mk('div', 'sync-wrap');
+    var syncCb = document.createElement('input');
+    syncCb.type = 'checkbox';
+    syncCb.className = 'sync-cb';
+    syncCb.id = 'sync-' + secId + '-' + q.id;
+    syncCb.checked = linked;
+    attr(syncCb, 'aria-label',
+      'Use this answer for the same question in other sections');
+    var syncLbl = mk('label', 'sync-lbl'); syncLbl.htmlFor = syncCb.id;
+    syncLbl.appendChild(txt(
+      'Sync this answer with the same question in other sections'));
+    syncWrap.appendChild(syncCb); syncWrap.appendChild(syncLbl);
+    L.appendChild(syncWrap);
     row.appendChild(L);
 
-    /* Right: live answer display + goto link */
+    /* Right column — input */
     var Ri = mk('div');
 
-    var valEl = mk('div', 'ref-answer ref-empty');
-    valEl.id = 'xref-' + q.id;
-    attr(valEl, 'aria-live', 'polite');
-    attr(valEl, 'aria-label', 'Current answer for ' + q.id);
-    syncXrefDisplay(valEl, q.id);
-    Ri.appendChild(valEl);
+    /* State helpers — "getVal" returns the value that this instance is
+       currently displaying; "writeVal" writes the value to the proper
+       store based on current link state. */
+    function getVal() {
+      if (linked) return (R[q.id] && R[q.id].value) || '';
+      return (RS[key] && RS[key].value) || '';
+    }
+    function getNotes() {
+      if (linked) return (R[q.id] && R[q.id].notes) || '';
+      return (RS[key] && RS[key].notes) || '';
+    }
+    function writeVal(v) {
+      if (linked) {
+        R[q.id] = R[q.id] || {};
+        if (v === undefined) delete R[q.id].value; else R[q.id].value = v;
+      } else {
+        RS[key] = RS[key] || { unlinked: true };
+        if (v === undefined) delete RS[key].value; else RS[key].value = v;
+      }
+    }
+    function writeNotes(v) {
+      if (linked) {
+        R[q.id] = R[q.id] || {};
+        R[q.id].notes = v;
+      } else {
+        RS[key] = RS[key] || { unlinked: true };
+        RS[key].notes = v;
+      }
+    }
 
-    var gotoBtn = mk('button', 'ref-goto');
-    gotoBtn.type = 'button';
-    attr(gotoBtn, 'data-goto', primarySecId);
-    attr(gotoBtn, 'aria-label', 'Edit ' + q.id + ' in ' + getSecLabel(primarySecId) + ' section');
-    gotoBtn.appendChild(txt('Edit in ' + getSecLabel(primarySecId) + ' \u2192'));
-    Ri.appendChild(gotoBtn);
+    /* The render/update closures are built per-type below and stored on
+       the secondary registry entry so pickAnswer() can update this
+       instance when the master value changes. */
+    var updateUI, updateNotesUI;
+
+    if (q.type === 'select') {
+      var selLbl = mk('label', 'flbl');
+      selLbl.htmlFor = 'fi-' + secId + '-' + q.id;
+      selLbl.appendChild(txt('Response'));
+      Ri.appendChild(selLbl);
+
+      var selEl = mk('select', 'analyst-select');
+      selEl.id = 'fi-' + secId + '-' + q.id;
+      attr(selEl, 'aria-labelledby', 'qt-' + secId + '-' + q.id);
+      var blankOpt = document.createElement('option');
+      blankOpt.value = ''; blankOpt.textContent = '-- Select an option --';
+      selEl.appendChild(blankOpt);
+      (q.options || []).forEach(function (opt) {
+        var o = document.createElement('option'); o.value = opt; o.textContent = opt;
+        selEl.appendChild(o);
+      });
+      selEl.value = getVal();
+      selEl.addEventListener('change', function () {
+        writeVal(selEl.value);
+        if (linked) { propagateLinkedValue(q.id, selEl.value, secId); checkGates(); }
+        refreshProgress();
+      });
+      Ri.appendChild(selEl);
+      updateUI = function (v) { selEl.value = v || ''; };
+
+    } else if (q.type === 'text' || q.type === 'textarea') {
+      var inputType = 'text';
+      if (q.type === 'text') {
+        var ql = q.q.toLowerCase();
+        if      (ql.indexOf('email') > -1)                          inputType = 'email';
+        else if (ql.indexOf('phone') > -1)                          inputType = 'tel';
+        else if (ql.indexOf('link') > -1 || ql.indexOf('url') > -1) inputType = 'url';
+      }
+      var lbl = mk('label', 'flbl');
+      lbl.htmlFor = 'fi-' + secId + '-' + q.id;
+      lbl.appendChild(txt('Response'));
+      Ri.appendChild(lbl);
+
+      var inp = q.type === 'textarea' ? mk('textarea') : document.createElement('input');
+      if (q.type === 'text') inp.type = inputType;
+      inp.id = 'fi-' + secId + '-' + q.id;
+      attr(inp, 'aria-labelledby', 'qt-' + secId + '-' + q.id);
+      if (q.type === 'text') inp.autocomplete = 'off'; else inp.rows = 3;
+      inp.value = getVal();
+      inp.addEventListener('input', function () {
+        writeVal(inp.value);
+        if (linked) { propagateLinkedValue(q.id, inp.value, secId); checkGates(); }
+        refreshProgress();
+      });
+      Ri.appendChild(inp);
+      updateUI = function (v) { inp.value = v || ''; };
+
+    } else {
+      /* Yes / No / N/A */
+      var wrap = mk('div', 'yng-wrap');
+      var grp = mk('div', 'yng'); attr(grp, 'role', 'group');
+      attr(grp, 'aria-labelledby', 'qt-' + secId + '-' + q.id);
+
+      var btnMap = {};
+      ['Yes', 'No', 'N/A'].forEach(function (v) {
+        var vk = v === 'N/A' ? 'na' : v.toLowerCase();
+        var btn = mk('button', 'ynb');
+        btn.type = 'button';
+        btn.id = 'yn-' + vk + '-' + secId + '-' + q.id;
+        attr(btn, 'aria-pressed', 'false');
+        attr(btn, 'data-qid', q.id);
+        attr(btn, 'data-val', v);
+        attr(btn, 'data-sec', secId);
+        attr(btn, 'aria-label',
+          (v === 'Yes' ? 'Yes \u2014 ' : v === 'No' ? 'No \u2014 ' : 'Not Applicable \u2014 ') + q.q);
+        var icon = mk('span'); attr(icon, 'aria-hidden', 'true');
+        icon.appendChild(txt(v === 'Yes' ? '\u2713 Yes' : v === 'No' ? '\u2717 No' : '\u2014 N/A'));
+        btn.appendChild(icon);
+        btn.addEventListener('click', function () {
+          var cur = getVal();
+          if (cur === v) {
+            writeVal(undefined);
+            applyYesNoDisplay('');
+            if (linked) { propagateLinkedValue(q.id, '', secId); checkGates(); }
+          } else {
+            writeVal(v);
+            applyYesNoDisplay(v);
+            if (linked) { propagateLinkedValue(q.id, v, secId); checkGates(); }
+          }
+          refreshProgress();
+        });
+        btnMap[v] = btn;
+        grp.appendChild(btn);
+      });
+      wrap.appendChild(grp);
+      Ri.appendChild(wrap);
+
+      /* Compliance indicator */
+      var ci = mk('div', 'cind');
+      ci.id = 'ci-' + secId + '-' + q.id;
+      attr(ci, 'role', 'status'); attr(ci, 'aria-live', 'polite');
+      Ri.appendChild(ci);
+
+      function applyYesNoDisplay(val) {
+        Object.keys(btnMap).forEach(function (kk) {
+          var b = btnMap[kk];
+          b.classList.remove('sel-y', 'sel-n', 'sel-na');
+          attr(b, 'aria-pressed', 'false');
+        });
+        if (val === 'Yes') { btnMap['Yes'].classList.add('sel-y'); attr(btnMap['Yes'], 'aria-pressed', 'true'); }
+        else if (val === 'No') { btnMap['No'].classList.add('sel-n'); attr(btnMap['No'], 'aria-pressed', 'true'); }
+        else if (val === 'N/A') { btnMap['N/A'].classList.add('sel-na'); attr(btnMap['N/A'], 'aria-pressed', 'true'); }
+
+        var scorable = (q.comp === 'Yes' || q.comp === 'No') &&
+                       q.loc !== 'Not Scored' && q.score !== 'NA';
+        ci.className = 'cind'; ci.textContent = '';
+        if (!scorable || !val) { /* leave hidden */ }
+        else if (val === 'N/A') { ci.className = 'cind on neu'; ci.textContent = '\u2014 N/A \u2014 Not applicable'; }
+        else if (val === q.comp) { ci.className = 'cind on ok'; ci.textContent = '\u2713 Compliant response'; }
+        else { ci.className = 'cind on bad'; ci.textContent = '\u2717 Non-compliant response'; }
+      }
+      applyYesNoDisplay(getVal());
+      updateUI = applyYesNoDisplay;
+    }
+
+    /* Notes */
+    var tog = mk('button', 'ntog'); tog.type = 'button';
+    attr(tog, 'aria-expanded', 'false');
+    attr(tog, 'aria-controls', 'na-' + secId + '-' + q.id);
+    attr(tog, 'aria-label', 'Add notes for ' + q.id);
+    tog.appendChild(txt('+ Add notes'));
+    tog.addEventListener('click', function () {
+      var open = tog.getAttribute('aria-expanded') === 'true';
+      attr(tog, 'aria-expanded', String(!open));
+      area.classList.toggle('on', !open);
+      tog.firstChild.textContent = open ? '+ Add notes' : '\u2212 Hide notes';
+    });
+    Ri.appendChild(tog);
+
+    var area = mk('div', 'narea'); area.id = 'na-' + secId + '-' + q.id;
+    attr(area, 'role', 'region');
+    var nlbl = mk('label', 'flbl'); nlbl.htmlFor = 'ni-' + secId + '-' + q.id;
+    nlbl.appendChild(txt('Notes / Context'));
+    area.appendChild(nlbl);
+    var nta = mk('textarea', 'notes-ta');
+    nta.id = 'ni-' + secId + '-' + q.id; nta.rows = 2;
+    attr(nta, 'aria-labelledby', 'qt-' + secId + '-' + q.id);
+    nta.value = getNotes();
+    nta.addEventListener('input', function () {
+      writeNotes(nta.value);
+      if (linked) propagateLinkedNotes(q.id, nta.value, secId);
+    });
+    area.appendChild(nta);
+    Ri.appendChild(area);
 
     row.appendChild(Ri);
 
-    /* Register for live updates */
-    xrefRegistry.push({ qid: q.id, el: valEl });
+    updateNotesUI = function (n) { nta.value = n || ''; };
+
+    /* Register so pickAnswer / input handlers can update this instance */
+    var instance = {
+      secId: secId,
+      isLinked: function () { return linked; },
+      updateUI: function (v) { updateUI(v); },
+      updateNotesUI: function (n) { updateNotesUI(n); },
+    };
+    secondaryReg[q.id] = secondaryReg[q.id] || [];
+    secondaryReg[q.id].push(instance);
+
+    /* Sync checkbox wiring: toggle link state; when linking, adopt
+       the master value (and discard the per-section override). */
+    syncCb.addEventListener('change', function () {
+      linked = syncCb.checked;
+      if (linked) {
+        delete RS[key];
+        /* Pull master value into this instance's UI */
+        var mv = (R[q.id] && R[q.id].value) || '';
+        updateUI(mv);
+        var mn = (R[q.id] && R[q.id].notes) || '';
+        updateNotesUI(mn);
+      } else {
+        /* Persist current master value as starting point for local edits */
+        RS[key] = { unlinked: true,
+                    value: (R[q.id] && R[q.id].value) || '',
+                    notes: (R[q.id] && R[q.id].notes) || '' };
+      }
+      row.classList.toggle('unlinked', !linked);
+      refreshProgress();
+    });
+    row.classList.toggle('unlinked', !linked);
 
     return row;
+  }
+
+  /* Propagate a value change originating in one instance to all OTHER
+     linked instances (primary + linked secondaries) of the same qid. */
+  function propagateLinkedValue(qid, val, fromSecId) {
+    /* Primary section uses unscoped DOM IDs */
+    syncPrimaryDisplay(qid, val);
+    /* Linked secondaries */
+    var insts = secondaryReg[qid] || [];
+    insts.forEach(function (ii) {
+      if (ii.secId === fromSecId) return;
+      if (ii.isLinked()) ii.updateUI(val);
+    });
+  }
+  function propagateLinkedNotes(qid, notes, fromSecId) {
+    /* Primary section notes textarea */
+    var primaryNi = document.getElementById('ni-' + qid);
+    if (primaryNi && primaryNi.value !== notes) primaryNi.value = notes;
+    var insts = secondaryReg[qid] || [];
+    insts.forEach(function (ii) {
+      if (ii.secId === fromSecId) return;
+      if (ii.isLinked()) ii.updateNotesUI(notes);
+    });
+  }
+
+  /* Update the PRIMARY section's DOM to reflect a value set elsewhere */
+  function syncPrimaryDisplay(qid, val) {
+    var q = HECVAT_QUESTIONS.find(function (x) { return x.id === qid; });
+    if (!q) return;
+
+    if (q.type === 'select' || q.type === 'text' || q.type === 'textarea') {
+      var fi = document.getElementById('fi-' + qid);
+      if (fi && fi.value !== (val || '')) fi.value = val || '';
+      return;
+    }
+    /* Yes/No/N/A — update button classes + aria-pressed + guidance + compliance */
+    ['y', 'n', 'na'].forEach(function (vk) {
+      var btn = document.getElementById('yn-' + vk + '-' + qid);
+      if (!btn) return;
+      btn.classList.remove('sel-y', 'sel-n', 'sel-na');
+      attr(btn, 'aria-pressed', 'false');
+    });
+    if (val === 'Yes')     { var b1 = document.getElementById('yn-y-'  + qid); if (b1) { b1.classList.add('sel-y');  attr(b1, 'aria-pressed', 'true'); } }
+    else if (val === 'No') { var b2 = document.getElementById('yn-n-'  + qid); if (b2) { b2.classList.add('sel-n');  attr(b2, 'aria-pressed', 'true'); } }
+    else if (val === 'N/A'){ var b3 = document.getElementById('yn-na-' + qid); if (b3) { b3.classList.add('sel-na'); attr(b3, 'aria-pressed', 'true'); } }
+
+    var yg = document.getElementById('yg-' + qid);
+    var ng = document.getElementById('ng-' + qid);
+    if (yg) { yg.classList.toggle('on', val === 'Yes'); attr(yg, 'aria-hidden', val === 'Yes' ? 'false' : 'true'); }
+    if (ng) { ng.classList.toggle('on', val === 'No');  attr(ng, 'aria-hidden', val === 'No'  ? 'false' : 'true'); }
+
+    var ci = document.getElementById('ci-' + qid);
+    if (ci) {
+      var scorable = (q.comp === 'Yes' || q.comp === 'No') &&
+                     q.loc !== 'Not Scored' && q.score !== 'NA';
+      ci.className = 'cind'; ci.textContent = '';
+      if (!scorable || !val) { /* hidden */ }
+      else if (val === 'N/A')       { ci.className = 'cind on neu'; ci.textContent = '\u2014 N/A \u2014 Not applicable'; }
+      else if (val === q.comp)      { ci.className = 'cind on ok';  ci.textContent = '\u2713 Compliant response'; }
+      else                          { ci.className = 'cind on bad'; ci.textContent = '\u2717 Non-compliant response'; }
+    }
   }
 
   function syncXrefDisplay(el, qid) {
@@ -442,9 +757,10 @@ var HECVAT_SEC = (function () {
      BUILD FULL QUESTION ROW
   ================================================================ */
   function buildQ(q, secId) {
-    /* Already rendered in an earlier section? Show cross-reference instead */
+    /* Already rendered in an earlier section? Render an independent
+       answerable instance with a sync checkbox (default: linked). */
     if (renderedIn[q.id] !== undefined) {
-      return buildQRef(q, renderedIn[q.id]);
+      return buildQSecondary(q, secId, renderedIn[q.id]);
     }
     renderedIn[q.id] = secId;
 
@@ -869,26 +1185,37 @@ var HECVAT_SEC = (function () {
     if (yg) { yg.classList.toggle('on', val === 'Yes'); attr(yg, 'aria-hidden', val === 'Yes' ? 'false' : 'true'); }
     if (ng) { ng.classList.toggle('on', val === 'No');  attr(ng, 'aria-hidden', val === 'No'  ? 'false' : 'true'); }
 
-    /* Compliance indicator */
+    /* Compliance indicator — only show when q.comp is a scorable Yes/No.
+       Questions with comp='Not scored' (or unset, or loc='Not Scored', or
+       score='NA') are routing/informational questions and must never display
+       a Compliant / Non-compliant verdict. */
     var ci = document.getElementById('ci-' + qid);
     if (ci) {
-      ci.className = 'cind on';
-      if (val === 'N/A') {
+      var scorable = (q.comp === 'Yes' || q.comp === 'No') &&
+                     q.loc !== 'Not Scored' && q.score !== 'NA';
+      ci.className = 'cind';
+      ci.textContent = '';
+      if (!scorable) {
+        /* Leave indicator hidden for routing / not-scored questions */
+      } else if (val === 'N/A') {
+        ci.className = 'cind on neu';
         ci.textContent = '\u2014 N/A \u2014 Not applicable';
-        ci.classList.add('neu');
-      } else if (q.comp && val === q.comp) {
+      } else if (val === q.comp) {
+        ci.className = 'cind on ok';
         ci.textContent = '\u2713 Compliant response';
-        ci.classList.add('ok');
-      } else if (q.comp) {
-        ci.textContent = '\u2717 Non-compliant response';
-        ci.classList.add('bad');
       } else {
-        ci.classList.remove('on');
+        ci.className = 'cind on bad';
+        ci.textContent = '\u2717 Non-compliant response';
       }
     }
 
     /* Refresh cross-reference displays for this question */
     xrefRegistry.forEach(function (x) { if (x.qid === qid) syncXrefDisplay(x.el, qid); });
+
+    /* Propagate to linked secondary instances */
+    (secondaryReg[qid] || []).forEach(function (ii) {
+      if (ii.isLinked()) ii.updateUI(val);
+    });
 
     checkGates();
     refreshProgress();
@@ -917,6 +1244,12 @@ var HECVAT_SEC = (function () {
     if (ci) { ci.className = 'cind'; ci.textContent = ''; }
 
     xrefRegistry.forEach(function(x){ if(x.qid===qid) syncXrefDisplay(x.el,qid); });
+
+    /* Propagate clear to linked secondary instances */
+    (secondaryReg[qid] || []).forEach(function (ii) {
+      if (ii.isLinked()) ii.updateUI('');
+    });
+
     checkGates();
     refreshProgress();
   }
@@ -930,15 +1263,29 @@ var HECVAT_SEC = (function () {
       R[qid].value = e.target.value;
       /* Update cross-references for text values */
       xrefRegistry.forEach(function (x) { if (x.qid === qid) syncXrefDisplay(x.el, qid); });
+      /* Propagate to linked secondary instances */
+      (secondaryReg[qid] || []).forEach(function (ii) {
+        if (ii.isLinked()) ii.updateUI(e.target.value);
+      });
       refreshProgress();
     }
-    if (nqid) { R[nqid] = R[nqid] || {}; R[nqid].notes = e.target.value; }
+    if (nqid) {
+      R[nqid] = R[nqid] || {};
+      R[nqid].notes = e.target.value;
+      /* Propagate notes to linked secondary instances */
+      (secondaryReg[nqid] || []).forEach(function (ii) {
+        if (ii.isLinked()) ii.updateNotesUI(e.target.value);
+      });
+    }
   });
 
   document.getElementById('main').addEventListener('click', function (e) {
     /* Yes/No/N/A button — clicking the already-selected answer deselects it */
     var yn = e.target.closest('.ynb');
     if (yn && yn.getAttribute('data-qid') && yn.getAttribute('data-val')) {
+      /* Secondary instances have their own per-button listeners (wired in
+         buildQSecondary) — skip them here so we don't double-fire. */
+      if (yn.getAttribute('data-sec')) return;
       var qidYn  = yn.getAttribute('data-qid');
       var valYn  = yn.getAttribute('data-val');
       var already = R[qidYn] && R[qidYn].value === valYn;
@@ -1173,6 +1520,10 @@ var HECVAT_SEC = (function () {
           var elInp = document.getElementById('fi-' + qid);
           /* Write via value property — never innerHTML */
           if (elInp) elInp.value = resp.value;
+          /* Update linked secondary instances */
+          (secondaryReg[qid] || []).forEach(function (ii) {
+            if (ii.isLinked()) ii.updateUI(resp.value);
+          });
         } else { pickAnswer(qid, resp.value); }
       }
       if (resp.notes) {
@@ -1183,6 +1534,9 @@ var HECVAT_SEC = (function () {
           var noteArea = document.getElementById('na-' + qid);
           if (noteArea) noteArea.classList.add('on');
         }
+        (secondaryReg[qid] || []).forEach(function (ii) {
+          if (ii.isLinked()) ii.updateNotesUI(resp.notes);
+        });
       }
     });
   }
@@ -2114,6 +2468,92 @@ var HECVAT_SEC = (function () {
   }
 
   /* ================================================================
+     STATISTICAL METHODS REFERENCE PANEL
+     Inserted into the Institution Evaluation tab. Documents the primary
+     statistics (CI, SEM) and visual formats analysts should use when
+     comparing groups / differences between means.
+  ================================================================ */
+  function buildStatMethodsRef() {
+    var sec = mk('div', 'cat-sec stat-methods-ref');
+
+    var h3 = mk('h3', 'cat-h3');
+    var togBtn = mk('button', 'cat-tog');
+    togBtn.type = 'button';
+    var togBodyId = 'stat-methods-body';
+    attr(togBtn, 'aria-expanded', 'false');
+    attr(togBtn, 'aria-controls', togBodyId);
+    togBtn.id = 'stat-methods-tog';
+
+    var togLbl = mk('span', 'cat-tog-lbl');
+    togLbl.appendChild(txt('\uD83D\uDCCA Statistical Methods \u2014 Comparing Groups & Means'));
+    togBtn.appendChild(togLbl);
+
+    var togIcon = mk('span', 'cat-tog-icon');
+    attr(togIcon, 'aria-hidden', 'true');
+    togIcon.textContent = '\u25B8';
+    togBtn.appendChild(togIcon);
+
+    h3.appendChild(togBtn);
+    sec.appendChild(h3);
+
+    var body = mk('div', 'cat-body cat-collapsed stat-methods-body');
+    body.id = togBodyId;
+    attr(body, 'role', 'region');
+    attr(body, 'aria-labelledby', 'stat-methods-tog');
+
+    var intro = mk('p', 'stat-intro');
+    intro.appendChild(txt(
+      'Confidence intervals and standard error are the primary statistical ' +
+      'metrics used to visualize differences between group means or answers. ' +
+      'In data visualization, these are typically displayed using bar charts ' +
+      'with error bars, box plots, or scatter plots (such as beeswarm plots) ' +
+      'that include summary statistics like the mean.'
+    ));
+    body.appendChild(intro);
+
+    var items = [
+      { term: 'Confidence Intervals (CI)',
+        body: 'These ranges indicate the likely magnitude of the difference ' +
+              'between groups; if the CI for the difference between two means ' +
+              'does not include zero, the difference is statistically significant.' },
+      { term: 'Standard Error of the Mean (SEM)',
+        body: 'This estimates the precision of the mean and is closely related ' +
+              'to t-tests, often used to show whether a fold change is ' +
+              'significantly different from zero.' },
+      { term: 'Visual Representations',
+        body: 'Box plots are particularly effective for comparing distributions ' +
+              'and identifying extreme values across multiple groups, while bar ' +
+              'charts with error bars provide a simple comparison of means for ' +
+              'categorical data.' },
+      { term: 'Significance Testing',
+        body: 'Statistical tests such as Fisher\u2019s Individual Tests or Tukey\u2019s ' +
+              'method are used to determine which specific pairs of groups have ' +
+              'mean differences that are statistically significant, often ' +
+              'indicated by non-overlapping confidence intervals or grouping ' +
+              'letters in output tables.' },
+    ];
+
+    var dl = mk('dl', 'stat-methods-list');
+    items.forEach(function (it) {
+      var dt = mk('dt', 'stat-term'); dt.appendChild(txt(it.term));
+      var dd = mk('dd', 'stat-def');  dd.appendChild(txt(it.body));
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+    body.appendChild(dl);
+
+    sec.appendChild(body);
+
+    togBtn.addEventListener('click', function () {
+      var open = togBtn.getAttribute('aria-expanded') === 'true';
+      attr(togBtn, 'aria-expanded', String(!open));
+      body.classList.toggle('cat-collapsed', open);
+      togIcon.textContent = open ? '\u25B8' : '\u25BE';
+    });
+
+    return sec;
+  }
+
+  /* ================================================================
      BUILD ALL EVAL PANELS
   ================================================================ */
   function buildEvalSections() {
@@ -2172,6 +2612,9 @@ var HECVAT_SEC = (function () {
       /* ── INSTITUTION EVALUATION ── */
       if (es.id === 'inst-eval') {
         body.appendChild(mkScorecardTable('inst-eval','Institution Evaluation Report Sections'));
+
+        /* Statistical methods reference — collapsible, collapsed by default */
+        body.appendChild(buildStatMethodsRef());
 
         /* Expand/Collapse all button bar */
         var expandBar = mk('div','ie-expand-bar');
