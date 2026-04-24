@@ -2652,21 +2652,31 @@ var HECVAT_SEC = (function () {
     ));
     body.appendChild(intro);
 
-    var chart1Wrap = mk('div', 'plot-wrap'); chart1Wrap.id = 'plot-ci-wrap';
-    var chart1Ttl = mk('div', 'plot-title');
-    chart1Ttl.appendChild(txt('Compliance proportion by category (with 95% CI)'));
-    chart1Wrap.appendChild(chart1Ttl);
-    var chart1 = mk('div', 'plot-svg-host'); chart1.id = 'plot-ci';
-    chart1Wrap.appendChild(chart1);
-    body.appendChild(chart1Wrap);
+    /* Each chart is wrapped in a <figure role="figure"> with a caption,
+       zoom controls, and a visually-hidden-by-default data table the
+       screen reader (and keyboard users) can expand to read the numbers
+       directly. The SVG itself gets <title>+<desc> so assistive tech
+       reading the graphic still gets a meaningful summary. */
+    body.appendChild(buildPlotFigure({
+      id: 'plot-ci',
+      figCls: 'plot-wrap',
+      caption: 'Compliance proportion by category (with 95% CI)',
+      tableLabel: 'Compliance proportion by category, with Wilson 95% confidence intervals and standard error of the mean (SEM)',
+    }));
 
-    var chart2Wrap = mk('div', 'plot-wrap'); chart2Wrap.id = 'plot-stack-wrap';
-    var chart2Ttl = mk('div', 'plot-title');
-    chart2Ttl.appendChild(txt('Answer composition by category'));
-    chart2Wrap.appendChild(chart2Ttl);
-    var chart2 = mk('div', 'plot-svg-host'); chart2.id = 'plot-stack';
-    chart2Wrap.appendChild(chart2);
-    body.appendChild(chart2Wrap);
+    body.appendChild(buildPlotFigure({
+      id: 'plot-stack',
+      figCls: 'plot-wrap',
+      caption: 'Answer composition by category',
+      tableLabel: 'Answer composition by category, counts of compliant, non-compliant, N/A, and unanswered questions',
+    }));
+
+    body.appendChild(buildPlotFigure({
+      id: 'plot-pairwise',
+      figCls: 'plot-wrap',
+      caption: 'Pairwise category comparisons (two-proportion z-test)',
+      tableLabel: 'Pairwise compliance-rate comparisons between categories using a two-proportion z-test; p-values are Bonferroni-adjusted and rows where the adjusted p-value is below 0.05 are flagged as a significant difference',
+    }));
 
     /* Legend */
     var legend = mk('div', 'plot-legend');
@@ -2678,6 +2688,7 @@ var HECVAT_SEC = (function () {
     ].forEach(function (e) {
       var li = mk('span', 'plot-legend-item');
       var sw = mk('span', 'plot-legend-sw ' + e[0]);
+      attr(sw, 'aria-hidden', 'true');
       li.appendChild(sw); li.appendChild(txt(e[1])); legend.appendChild(li);
     });
     body.appendChild(legend);
@@ -2696,30 +2707,200 @@ var HECVAT_SEC = (function () {
     return sec;
   }
 
-  /* (Re)render both charts into their SVG hosts using current responses. */
+  /* Build one accessible plot figure: caption + toolbar (zoom in/out/reset
+     + show-data-table) + host DIV that will receive the SVG + a hidden
+     data-table wrapper the toolbar reveals. */
+  function buildPlotFigure(cfg) {
+    var fig = mk('figure', cfg.figCls);
+    attr(fig, 'role', 'figure');
+
+    var capId = cfg.id + '-cap';
+    var cap = mk('figcaption', 'plot-title');
+    cap.id = capId;
+    cap.appendChild(txt(cfg.caption));
+    attr(fig, 'aria-labelledby', capId);
+    fig.appendChild(cap);
+
+    /* Toolbar */
+    var tbar = mk('div', 'plot-toolbar');
+    attr(tbar, 'role', 'toolbar');
+    attr(tbar, 'aria-label', 'Controls for ' + cfg.caption);
+
+    function mkTbBtn(label, ariaLabel, action) {
+      var b = mk('button', 'plot-tb-btn'); b.type = 'button';
+      attr(b, 'aria-label', ariaLabel);
+      attr(b, 'title', ariaLabel);
+      b.appendChild(txt(label));
+      b.addEventListener('click', action);
+      return b;
+    }
+
+    var zoomLevel = 1;
+    function applyZoom() {
+      var host = document.getElementById(cfg.id);
+      if (!host) return;
+      host.style.setProperty('--plot-zoom', String(zoomLevel));
+      var readout = document.getElementById(cfg.id + '-zoomlvl');
+      if (readout) readout.textContent = Math.round(zoomLevel * 100) + '%';
+    }
+
+    tbar.appendChild(mkTbBtn('\u2212', 'Zoom out', function () {
+      zoomLevel = Math.max(0.5, +(zoomLevel - 0.25).toFixed(2)); applyZoom();
+    }));
+    var zLvl = mk('span', 'plot-zoom-lvl'); zLvl.id = cfg.id + '-zoomlvl';
+    attr(zLvl, 'aria-live', 'polite'); zLvl.appendChild(txt('100%'));
+    tbar.appendChild(zLvl);
+    tbar.appendChild(mkTbBtn('+', 'Zoom in', function () {
+      zoomLevel = Math.min(3, +(zoomLevel + 0.25).toFixed(2)); applyZoom();
+    }));
+    tbar.appendChild(mkTbBtn('Reset', 'Reset zoom to 100%', function () {
+      zoomLevel = 1; applyZoom();
+    }));
+
+    /* Data-table toggle */
+    var tblWrapId = cfg.id + '-table-wrap';
+    var tblBtn = mk('button', 'plot-tb-btn plot-tb-btn-data'); tblBtn.type = 'button';
+    attr(tblBtn, 'aria-expanded', 'false');
+    attr(tblBtn, 'aria-controls', tblWrapId);
+    attr(tblBtn, 'aria-label', 'Show data table for ' + cfg.caption);
+    tblBtn.appendChild(txt('View data as table'));
+    tbar.appendChild(tblBtn);
+
+    fig.appendChild(tbar);
+
+    /* SVG host */
+    var host = mk('div', 'plot-svg-host'); host.id = cfg.id;
+    attr(host, 'tabindex', '0'); /* keyboard-focusable so screen-reader users
+                                    can reach it and hear its aria-label */
+    fig.appendChild(host);
+
+    /* Data table wrapper (hidden by default) */
+    var tblWrap = mk('div', 'plot-table-wrap');
+    tblWrap.id = tblWrapId;
+    attr(tblWrap, 'hidden', 'hidden');
+    attr(tblWrap, 'aria-label', cfg.tableLabel);
+    fig.appendChild(tblWrap);
+
+    tblBtn.addEventListener('click', function () {
+      var open = tblBtn.getAttribute('aria-expanded') === 'true';
+      attr(tblBtn, 'aria-expanded', String(!open));
+      if (open) {
+        tblWrap.setAttribute('hidden', 'hidden');
+        tblBtn.firstChild.textContent = 'View data as table';
+        attr(tblBtn, 'aria-label', 'Show data table for ' + cfg.caption);
+      } else {
+        tblWrap.removeAttribute('hidden');
+        tblBtn.firstChild.textContent = 'Hide data table';
+        attr(tblBtn, 'aria-label', 'Hide data table for ' + cfg.caption);
+      }
+    });
+
+    return fig;
+  }
+
+  /* Normal-distribution 2-sided p-value from a z statistic.
+     Uses Abramowitz & Stegun 7.1.26 rational approximation of erf. */
+  function zToPTwoSided(z) {
+    var ab = Math.abs(z);
+    var a1 =  0.254829592, a2 = -0.284496736, a3 =  1.421413741,
+        a4 = -1.453152027, a5 =  1.061405429, p  =  0.3275911;
+    var sign = 1;
+    var x = ab / Math.SQRT2;
+    var t = 1.0 / (1.0 + p * x);
+    var y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+    var erf = sign * y;
+    var cdf = 0.5 * (1 + erf);
+    return 2 * (1 - cdf);
+  }
+
+  /* Two-proportion z-test. Returns { z, p }. */
+  function twoProportionZ(x1, n1, x2, n2) {
+    if (n1 <= 0 || n2 <= 0) return { z: 0, p: 1 };
+    var p1 = x1 / n1, p2 = x2 / n2;
+    var pp = (x1 + x2) / (n1 + n2);           // pooled proportion
+    var se = Math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2));
+    if (se === 0) return { z: 0, p: 1 };
+    var z = (p1 - p2) / se;
+    return { z: z, p: zToPTwoSided(z) };
+  }
+
+  /* Write an accessible data table into the hidden <div> for a plot.
+     caption is the <caption> text; headers is an array of TH strings;
+     rows is an array-of-arrays of cell values (coerced via String). */
+  function buildPlotDataTable(wrap, caption, headers, rows) {
+    wrap.replaceChildren();
+    if (!rows.length) {
+      var empty = mk('p'); empty.appendChild(txt('No data available yet.'));
+      wrap.appendChild(empty);
+      return;
+    }
+    var tbl = mk('table', 'plot-table');
+    var cap = mk('caption'); cap.appendChild(txt(caption)); tbl.appendChild(cap);
+    var thead = mk('thead'); var trh = mk('tr');
+    headers.forEach(function (h) { var th = mk('th'); attr(th, 'scope', 'col'); th.appendChild(txt(h)); trh.appendChild(th); });
+    thead.appendChild(trh); tbl.appendChild(thead);
+    var tbody = mk('tbody');
+    rows.forEach(function (r) {
+      var tr = mk('tr');
+      r.forEach(function (cell, idx) {
+        var el = idx === 0 ? mk('th') : mk('td');
+        if (idx === 0) attr(el, 'scope', 'row');
+        el.appendChild(txt(String(cell)));
+        tr.appendChild(el);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    wrap.appendChild(tbl);
+  }
+
+  /* (Re)render all plots into their SVG hosts + data tables using current
+     responses. Each SVG gets a <title>+<desc> first-child pair (the
+     accessible-name source for role="img") and each figure gets a
+     hidden-by-default data table with the same information in tabular
+     form so screen-reader and keyboard users get an equivalent view. */
   function renderCompliancePlots() {
     var host1 = document.getElementById('plot-ci');
     var host2 = document.getElementById('plot-stack');
-    if (!host1 || !host2) return;
+    var host3 = document.getElementById('plot-pairwise');
+    if (!host1 || !host2 || !host3) return;
+
+    var tbl1 = document.getElementById('plot-ci-table-wrap');
+    var tbl2 = document.getElementById('plot-stack-table-wrap');
+    var tbl3 = document.getElementById('plot-pairwise-table-wrap');
 
     var stats = computeCategoryStats();
     var cats  = Object.keys(stats).filter(function (c) { return stats[c].total > 0; });
-    /* Sort categories by compliance rate desc so the chart reads top-down */
     cats.sort(function (a, b) {
       var pa = stats[a].total ? stats[a].comp / Math.max(1, stats[a].comp + stats[a].nc) : 0;
       var pb = stats[b].total ? stats[b].comp / Math.max(1, stats[b].comp + stats[b].nc) : 0;
       return pb - pa;
     });
 
-    /* Empty-state */
-    host1.replaceChildren(); host2.replaceChildren();
+    host1.replaceChildren(); host2.replaceChildren(); host3.replaceChildren();
+
     if (!cats.length) {
       var msg1 = mk('div', 'plot-empty'); msg1.appendChild(txt('No scorable categories yet \u2014 answer a few Yes/No questions to populate the chart.'));
       host1.appendChild(msg1);
       var msg2 = mk('div', 'plot-empty'); msg2.appendChild(txt('Nothing to stack yet.'));
       host2.appendChild(msg2);
+      var msg3 = mk('div', 'plot-empty'); msg3.appendChild(txt('At least two answered categories needed for pairwise comparison.'));
+      host3.appendChild(msg3);
+      if (tbl1) tbl1.replaceChildren();
+      if (tbl2) tbl2.replaceChildren();
+      if (tbl3) tbl3.replaceChildren();
       return;
     }
+
+    /* Pre-compute per-category statistics used by chart 1 and the table */
+    var perCat = cats.map(function (cat) {
+      var s = stats[cat];
+      var answered = s.comp + s.nc;
+      var ci = wilsonCI(s.comp, answered);
+      /* SEM of a proportion: sqrt( p(1-p) / n ) */
+      var sem = answered > 0 ? Math.sqrt(ci.p * (1 - ci.p) / answered) : null;
+      return { cat: cat, stats: s, answered: answered, ci: ci, sem: sem };
+    });
 
     /* ───── Chart 1: bars + 95% CI error bars ───── */
     var W = Math.max(560, 48 * cats.length + 100);
@@ -2732,89 +2913,86 @@ var HECVAT_SEC = (function () {
     var svg = svgEl('svg', {
       'viewBox': '0 0 ' + W + ' ' + H,
       'role': 'img',
-      'aria-label': 'Compliance proportion by category with 95% confidence intervals',
-      'class': 'plot-svg'
+      'aria-labelledby': 'plot-ci-svg-title plot-ci-svg-desc',
+      'class': 'plot-svg',
+      'focusable': 'false'
     });
+    /* <title> and <desc> MUST be first children for AT to pick them up. */
+    var t1 = svgEl('title', { id: 'plot-ci-svg-title' });
+    t1.textContent = 'Compliance proportion by category with 95% confidence intervals';
+    svg.appendChild(t1);
+    var d1 = svgEl('desc',  { id: 'plot-ci-svg-desc' });
+    d1.textContent = 'Bar chart. ' + perCat.map(function (r) {
+      if (r.answered === 0) return r.cat + ' has no answered scorable questions';
+      return r.cat + ': ' + Math.round(r.ci.p * 100) + '% compliant, ' +
+             '95% CI ' + Math.round(r.ci.lo * 100) + '% to ' + Math.round(r.ci.hi * 100) + '%, ' +
+             'n equals ' + r.answered;
+    }).join('. ') + '.';
+    svg.appendChild(d1);
 
-    /* y-axis grid + labels (0%, 25%, 50%, 75%, 100%) */
     for (var i = 0; i <= 4; i++) {
       var gy = PAD_T + chartH - (i / 4) * chartH;
-      svg.appendChild(svgEl('line', {
-        x1: PAD_L, x2: W - PAD_R, y1: gy, y2: gy,
-        'class': 'plot-grid'
-      }));
-      svg.appendChild(svgText((i * 25) + '%', {
-        x: PAD_L - 6, y: gy + 3, 'text-anchor': 'end', 'class': 'plot-axis-lbl'
-      }));
+      svg.appendChild(svgEl('line', { x1: PAD_L, x2: W - PAD_R, y1: gy, y2: gy, 'class': 'plot-grid' }));
+      svg.appendChild(svgText((i * 25) + '%', { x: PAD_L - 6, y: gy + 3, 'text-anchor': 'end', 'class': 'plot-axis-lbl' }));
     }
-    /* y-axis title */
-    var yTitle = svgText('Compliance %', {
+    svg.appendChild(svgText('Compliance %', {
       x: 12, y: PAD_T + chartH / 2, 'text-anchor': 'middle',
       'class': 'plot-axis-title',
       transform: 'rotate(-90 12 ' + (PAD_T + chartH / 2) + ')'
-    });
-    svg.appendChild(yTitle);
+    }));
 
-    cats.forEach(function (cat, idx) {
-      var s = stats[cat];
-      var answered = s.comp + s.nc;              // denominator for Wilson CI (exclude N/A, unanswered)
-      var ci = wilsonCI(s.comp, answered);
+    perCat.forEach(function (row, idx) {
       var cx = PAD_L + step * idx + step / 2;
-
-      /* Bar */
-      var barH = ci.p * chartH;
+      var barH = row.ci.p * chartH;
       var by = PAD_T + chartH - barH;
-      svg.appendChild(svgEl('rect', {
-        x: cx - barW / 2, y: by, width: barW, height: barH,
-        'class': 'plot-bar'
-      }));
+      var rect = svgEl('rect', { x: cx - barW / 2, y: by, width: barW, height: barH, 'class': 'plot-bar' });
+      /* Per-bar tooltip — reads as accessible name when the bar is focused */
+      var rt = svgEl('title');
+      rt.textContent = row.cat + ': ' + Math.round(row.ci.p * 100) + '%, 95% CI ' +
+        Math.round(row.ci.lo * 100) + '%\u2013' + Math.round(row.ci.hi * 100) + '%, n=' + row.answered;
+      rect.appendChild(rt);
+      svg.appendChild(rect);
 
-      /* Error bar (CI) */
-      if (answered > 0) {
-        var yHi = PAD_T + chartH - ci.hi * chartH;
-        var yLo = PAD_T + chartH - ci.lo * chartH;
-        svg.appendChild(svgEl('line', {
-          x1: cx, x2: cx, y1: yHi, y2: yLo, 'class': 'plot-err'
-        }));
-        svg.appendChild(svgEl('line', {
-          x1: cx - 6, x2: cx + 6, y1: yHi, y2: yHi, 'class': 'plot-err'
-        }));
-        svg.appendChild(svgEl('line', {
-          x1: cx - 6, x2: cx + 6, y1: yLo, y2: yLo, 'class': 'plot-err'
-        }));
+      if (row.answered > 0) {
+        var yHi = PAD_T + chartH - row.ci.hi * chartH;
+        var yLo = PAD_T + chartH - row.ci.lo * chartH;
+        svg.appendChild(svgEl('line', { x1: cx, x2: cx, y1: yHi, y2: yLo, 'class': 'plot-err' }));
+        svg.appendChild(svgEl('line', { x1: cx - 6, x2: cx + 6, y1: yHi, y2: yHi, 'class': 'plot-err' }));
+        svg.appendChild(svgEl('line', { x1: cx - 6, x2: cx + 6, y1: yLo, y2: yLo, 'class': 'plot-err' }));
       }
 
-      /* Percentage label above bar */
-      var pctLbl = answered > 0 ? Math.round(ci.p * 100) + '%' : 'n/a';
-      svg.appendChild(svgText(pctLbl, {
-        x: cx,
-        y: Math.max(PAD_T + 10, by - 6),
-        'text-anchor': 'middle',
-        'class': 'plot-val-lbl'
-      }));
+      var pctLbl = row.answered > 0 ? Math.round(row.ci.p * 100) + '%' : 'n/a';
+      svg.appendChild(svgText(pctLbl, { x: cx, y: Math.max(PAD_T + 10, by - 6), 'text-anchor': 'middle', 'class': 'plot-val-lbl' }));
 
-      /* Category label (rotated 35°) */
-      var lbl = svgText(cat, {
-        x: cx,
-        y: PAD_T + chartH + 14,
-        'text-anchor': 'end',
-        'class': 'plot-axis-lbl',
+      var lbl = svgText(row.cat, {
+        x: cx, y: PAD_T + chartH + 14, 'text-anchor': 'end', 'class': 'plot-axis-lbl',
         transform: 'rotate(-35 ' + cx + ' ' + (PAD_T + chartH + 14) + ')'
       });
-      /* Append a tooltip with the full category name + n */
-      var fullName = (typeof CAT_FULL !== 'undefined' && CAT_FULL[cat]) || cat;
-      var ttl = svgEl('title'); ttl.textContent = fullName + ' \u2014 n=' + answered;
+      var fullName = (typeof CAT_FULL !== 'undefined' && CAT_FULL[row.cat]) || row.cat;
+      var ttl = svgEl('title'); ttl.textContent = fullName + ' \u2014 n=' + row.answered;
       lbl.appendChild(ttl);
       svg.appendChild(lbl);
     });
 
-    /* x-axis baseline */
-    svg.appendChild(svgEl('line', {
-      x1: PAD_L, x2: W - PAD_R, y1: PAD_T + chartH, y2: PAD_T + chartH,
-      'class': 'plot-axis-line'
-    }));
-
+    svg.appendChild(svgEl('line', { x1: PAD_L, x2: W - PAD_R, y1: PAD_T + chartH, y2: PAD_T + chartH, 'class': 'plot-axis-line' }));
     host1.appendChild(svg);
+
+    /* Data table 1 */
+    if (tbl1) {
+      var rows1 = perCat.map(function (r) {
+        return [
+          r.cat + ' \u2014 ' + ((typeof CAT_FULL !== 'undefined' && CAT_FULL[r.cat]) || r.cat),
+          r.answered,
+          r.answered > 0 ? (r.ci.p * 100).toFixed(1) + '%' : 'n/a',
+          r.sem !== null ? (r.sem * 100).toFixed(2) + '%' : 'n/a',
+          r.answered > 0 ? (r.ci.lo * 100).toFixed(1) + '% \u2013 ' + (r.ci.hi * 100).toFixed(1) + '%' : 'n/a',
+        ];
+      });
+      buildPlotDataTable(tbl1,
+        'Compliance proportion by category with 95% Wilson CI and SEM',
+        ['Category', 'n (answered)', 'Compliance %', 'SEM', '95% CI'],
+        rows1);
+    }
 
     /* ───── Chart 2: stacked composition ───── */
     var W2 = W, H2 = 260, PAD_L2 = 48, PAD_B2 = 70, PAD_T2 = 14, PAD_R2 = 14;
@@ -2826,21 +3004,26 @@ var HECVAT_SEC = (function () {
     var svg2 = svgEl('svg', {
       'viewBox': '0 0 ' + W2 + ' ' + H2,
       'role': 'img',
-      'aria-label': 'Answer composition by category',
-      'class': 'plot-svg'
+      'aria-labelledby': 'plot-stack-svg-title plot-stack-svg-desc',
+      'class': 'plot-svg',
+      'focusable': 'false'
     });
+    var t2 = svgEl('title', { id: 'plot-stack-svg-title' });
+    t2.textContent = 'Answer composition by category';
+    svg2.appendChild(t2);
+    var d2 = svgEl('desc', { id: 'plot-stack-svg-desc' });
+    d2.textContent = 'Stacked bar chart. ' + cats.map(function (c) {
+      var s = stats[c];
+      return c + ' has ' + s.total + ' total questions: ' + s.comp + ' compliant, ' +
+             s.nc + ' non-compliant, ' + s.na + ' N/A, ' + s.unans + ' unanswered';
+    }).join('. ') + '.';
+    svg2.appendChild(d2);
 
-    /* Max questions across categories for y-axis scaling */
     var maxN = cats.reduce(function (m, c) { return Math.max(m, stats[c].total); }, 1);
-    /* Gridlines at 0, 25%, 50%, 75%, 100% of maxN */
     for (var j = 0; j <= 4; j++) {
       var gy2 = PAD_T2 + chartH2 - (j / 4) * chartH2;
-      svg2.appendChild(svgEl('line', {
-        x1: PAD_L2, x2: W2 - PAD_R2, y1: gy2, y2: gy2, 'class': 'plot-grid'
-      }));
-      svg2.appendChild(svgText(String(Math.round((j / 4) * maxN)), {
-        x: PAD_L2 - 6, y: gy2 + 3, 'text-anchor': 'end', 'class': 'plot-axis-lbl'
-      }));
+      svg2.appendChild(svgEl('line', { x1: PAD_L2, x2: W2 - PAD_R2, y1: gy2, y2: gy2, 'class': 'plot-grid' }));
+      svg2.appendChild(svgText(String(Math.round((j / 4) * maxN)), { x: PAD_L2 - 6, y: gy2 + 3, 'text-anchor': 'end', 'class': 'plot-axis-lbl' }));
     }
     svg2.appendChild(svgText('Questions', {
       x: 12, y: PAD_T2 + chartH2 / 2, 'text-anchor': 'middle',
@@ -2852,49 +3035,191 @@ var HECVAT_SEC = (function () {
       var s = stats[cat];
       var cx = PAD_L2 + step2 * idx + step2 / 2;
       var segs = [
-        { key: 'plot-comp',  n: s.comp },
-        { key: 'plot-nc',    n: s.nc },
-        { key: 'plot-na',    n: s.na },
-        { key: 'plot-unans', n: s.unans },
+        { key: 'plot-comp',  n: s.comp,  label: 'compliant' },
+        { key: 'plot-nc',    n: s.nc,    label: 'non-compliant' },
+        { key: 'plot-na',    n: s.na,    label: 'N/A' },
+        { key: 'plot-unans', n: s.unans, label: 'unanswered' },
       ];
       var cum = 0;
       segs.forEach(function (seg) {
         if (seg.n <= 0) return;
         var segH = (seg.n / maxN) * chartH2;
         var segY = PAD_T2 + chartH2 - ((cum + seg.n) / maxN) * chartH2;
-        svg2.appendChild(svgEl('rect', {
+        var segEl = svgEl('rect', {
           x: cx - barW2 / 2, y: segY, width: barW2, height: segH,
           'class': 'plot-seg ' + seg.key
-        }));
+        });
+        var st = svgEl('title'); st.textContent = cat + ': ' + seg.n + ' ' + seg.label; segEl.appendChild(st);
+        svg2.appendChild(segEl);
         cum += seg.n;
       });
-      /* Total-n label above */
       svg2.appendChild(svgText('n=' + s.total, {
-        x: cx,
-        y: PAD_T2 + chartH2 - (s.total / maxN) * chartH2 - 4,
-        'text-anchor': 'middle',
-        'class': 'plot-val-lbl'
+        x: cx, y: PAD_T2 + chartH2 - (s.total / maxN) * chartH2 - 4,
+        'text-anchor': 'middle', 'class': 'plot-val-lbl'
       }));
-      /* Category label */
       var lbl2 = svgText(cat, {
-        x: cx,
-        y: PAD_T2 + chartH2 + 14,
-        'text-anchor': 'end',
-        'class': 'plot-axis-lbl',
+        x: cx, y: PAD_T2 + chartH2 + 14, 'text-anchor': 'end', 'class': 'plot-axis-lbl',
         transform: 'rotate(-35 ' + cx + ' ' + (PAD_T2 + chartH2 + 14) + ')'
       });
       var fullName2 = (typeof CAT_FULL !== 'undefined' && CAT_FULL[cat]) || cat;
       var ttl2 = svgEl('title'); ttl2.textContent = fullName2;
-      lbl2.appendChild(ttl2);
-      svg2.appendChild(lbl2);
+      lbl2.appendChild(ttl2); svg2.appendChild(lbl2);
+    });
+    svg2.appendChild(svgEl('line', { x1: PAD_L2, x2: W2 - PAD_R2, y1: PAD_T2 + chartH2, y2: PAD_T2 + chartH2, 'class': 'plot-axis-line' }));
+    host2.appendChild(svg2);
+
+    /* Data table 2 */
+    if (tbl2) {
+      var rows2 = cats.map(function (c) {
+        var s = stats[c];
+        return [
+          c + ' \u2014 ' + ((typeof CAT_FULL !== 'undefined' && CAT_FULL[c]) || c),
+          s.comp, s.nc, s.na, s.unans, s.total
+        ];
+      });
+      buildPlotDataTable(tbl2,
+        'Raw answer counts by category',
+        ['Category', 'Compliant', 'Non-Compliant', 'N/A', 'Unanswered', 'Total'],
+        rows2);
+    }
+
+    /* ───── Chart 3: pairwise category comparisons (two-proportion z-test) ─────
+       For every pair of categories that both have answered>=1, compute a
+       two-proportion z-test on compliance rate. Bonferroni-adjust the
+       p-value (multiply by number of comparisons, cap at 1) to control the
+       family-wise error rate. Render as a heatmap-style grid: rows = cats,
+       cols = cats, cell shade = significance strength. */
+    var eligible = perCat.filter(function (r) { return r.answered > 0; });
+    if (eligible.length < 2) {
+      var msg3b = mk('div', 'plot-empty');
+      msg3b.appendChild(txt('At least two categories with answered questions needed.'));
+      host3.appendChild(msg3b);
+      if (tbl3) tbl3.replaceChildren();
+      return;
+    }
+    var m = eligible.length;
+    var nComparisons = m * (m - 1) / 2;
+    var pairs = [];
+    for (var ii = 0; ii < m; ii++) {
+      for (var jj = ii + 1; jj < m; jj++) {
+        var A = eligible[ii], B = eligible[jj];
+        var test = twoProportionZ(A.stats.comp, A.answered, B.stats.comp, B.answered);
+        var adj = Math.min(1, test.p * nComparisons);
+        pairs.push({ a: A, b: B, z: test.z, p: test.p, padj: adj, sig: adj < 0.05 });
+      }
+    }
+
+    /* Heatmap-style grid */
+    var CELL = 38;
+    var headPx = 84;   // left + top label band
+    var W3 = headPx + m * CELL + 20;
+    var H3 = headPx + m * CELL + 20;
+
+    var svg3 = svgEl('svg', {
+      'viewBox': '0 0 ' + W3 + ' ' + H3,
+      'role': 'img',
+      'aria-labelledby': 'plot-pw-svg-title plot-pw-svg-desc',
+      'class': 'plot-svg',
+      'focusable': 'false'
+    });
+    var t3 = svgEl('title', { id: 'plot-pw-svg-title' });
+    t3.textContent = 'Pairwise compliance rate comparisons using a two-proportion z-test with Bonferroni adjustment';
+    svg3.appendChild(t3);
+    var d3 = svgEl('desc', { id: 'plot-pw-svg-desc' });
+    var sigPairs = pairs.filter(function (p) { return p.sig; });
+    d3.textContent = (sigPairs.length === 0)
+      ? 'No statistically significant differences between category compliance rates after Bonferroni adjustment.'
+      : sigPairs.length + ' of ' + pairs.length + ' pairs differ significantly (adjusted p less than 0.05): ' +
+        sigPairs.map(function (p) { return p.a.cat + ' vs ' + p.b.cat + ', adjusted p equals ' + p.padj.toFixed(3); }).join('; ') + '.';
+    svg3.appendChild(d3);
+
+    /* Column labels (top) */
+    eligible.forEach(function (r, i) {
+      var cxL = headPx + i * CELL + CELL / 2;
+      var lbl = svgText(r.cat, {
+        x: cxL, y: headPx - 6, 'text-anchor': 'end', 'class': 'plot-axis-lbl',
+        transform: 'rotate(-55 ' + cxL + ' ' + (headPx - 6) + ')'
+      });
+      svg3.appendChild(lbl);
+    });
+    /* Row labels (left) */
+    eligible.forEach(function (r, i) {
+      var cyL = headPx + i * CELL + CELL / 2 + 3;
+      svg3.appendChild(svgText(r.cat, { x: headPx - 6, y: cyL, 'text-anchor': 'end', 'class': 'plot-axis-lbl' }));
     });
 
-    svg2.appendChild(svgEl('line', {
-      x1: PAD_L2, x2: W2 - PAD_R2, y1: PAD_T2 + chartH2, y2: PAD_T2 + chartH2,
-      'class': 'plot-axis-line'
-    }));
+    /* Cells */
+    for (var ri = 0; ri < m; ri++) {
+      for (var ci2 = 0; ci2 < m; ci2++) {
+        var x = headPx + ci2 * CELL;
+        var y = headPx + ri * CELL;
+        var cellCls = 'plot-pw-cell plot-pw-cell-empty';
+        var label = '';
+        var pairTitle = '';
+        if (ri === ci2) {
+          cellCls = 'plot-pw-cell plot-pw-cell-diag';
+          label = '\u2500';
+          pairTitle = eligible[ri].cat + ' (same category)';
+        } else {
+          /* Find the pair (symmetric) */
+          var A2 = eligible[Math.min(ri, ci2)];
+          var B2 = eligible[Math.max(ri, ci2)];
+          var thePair = pairs.find(function (p) { return p.a === A2 && p.b === B2; });
+          if (thePair) {
+            if (thePair.padj < 0.001) cellCls = 'plot-pw-cell plot-pw-cell-sig3';
+            else if (thePair.padj < 0.01) cellCls = 'plot-pw-cell plot-pw-cell-sig2';
+            else if (thePair.padj < 0.05) cellCls = 'plot-pw-cell plot-pw-cell-sig1';
+            else cellCls = 'plot-pw-cell plot-pw-cell-ns';
+            label = thePair.padj < 0.001 ? '***' : thePair.padj < 0.01 ? '**' : thePair.padj < 0.05 ? '*' : 'ns';
+            pairTitle = A2.cat + ' vs ' + B2.cat + ' \u2014 adjusted p=' + thePair.padj.toFixed(3) +
+              ' (raw p=' + thePair.p.toFixed(3) + ', z=' + thePair.z.toFixed(2) + ')';
+          }
+        }
+        var rect3 = svgEl('rect', { x: x + 1, y: y + 1, width: CELL - 2, height: CELL - 2, 'class': cellCls });
+        var rt3 = svgEl('title'); rt3.textContent = pairTitle; rect3.appendChild(rt3);
+        svg3.appendChild(rect3);
+        if (label) {
+          svg3.appendChild(svgText(label, {
+            x: x + CELL / 2, y: y + CELL / 2 + 4, 'text-anchor': 'middle', 'class': 'plot-pw-lbl'
+          }));
+        }
+      }
+    }
 
-    host2.appendChild(svg2);
+    host3.appendChild(svg3);
+
+    /* Key below the heatmap */
+    var keyBar = mk('div', 'plot-pw-key');
+    [
+      ['plot-pw-cell-sig3', '*** p<0.001'],
+      ['plot-pw-cell-sig2', '** p<0.01'],
+      ['plot-pw-cell-sig1', '* p<0.05'],
+      ['plot-pw-cell-ns',   'ns (not significant)'],
+    ].forEach(function (kv) {
+      var item = mk('span', 'plot-legend-item');
+      var sw = mk('span', 'plot-legend-sw ' + kv[0]); attr(sw, 'aria-hidden', 'true');
+      item.appendChild(sw); item.appendChild(txt(kv[1])); keyBar.appendChild(item);
+    });
+    host3.appendChild(keyBar);
+
+    /* Data table 3 — every pair, with its adjusted p-value */
+    if (tbl3) {
+      var rows3 = pairs.map(function (p) {
+        return [
+          p.a.cat + ' vs ' + p.b.cat,
+          Math.round(p.a.ci.p * 100) + '% (n=' + p.a.answered + ')',
+          Math.round(p.b.ci.p * 100) + '% (n=' + p.b.answered + ')',
+          p.z.toFixed(2),
+          p.p.toFixed(3),
+          p.padj.toFixed(3),
+          p.sig ? 'Yes' : 'No'
+        ];
+      });
+      buildPlotDataTable(tbl3,
+        'Pairwise two-proportion z-test with Bonferroni adjustment. Bonferroni multiplier n equals ' + nComparisons,
+        ['Pair', 'Rate A', 'Rate B', 'z', 'Raw p', 'Adjusted p', 'Significant at α=0.05?'],
+        rows3);
+    }
   }
 
   /* ================================================================
