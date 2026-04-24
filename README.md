@@ -198,6 +198,17 @@ completed submission:
 | **High-Risk Evaluation** | Condensed view: the 90 Critical questions plus any the analyst has flagged as Non-Negotiable. Read-only summary that reflects overrides made elsewhere. |
 | **Privacy Analyst Evaluation** | The ten privacy categories (PRGN, PCOM, PDOC, PTHP, PCHG, PDAT, PRPO, INTL, DRPV, DPAI) with the same override controls as Institution Evaluation. |
 
+**Persistence:** Every Importance Override, Compliance Override,
+Non-Negotiable flag, and Analyst Notes field is saved with **Save
+Progress** (encrypted together with vendor responses), included in the
+**JSON** export (as a separate `analystEvaluations` map), added as four
+extra columns on the **CSV** export (`Importance Override`,
+`Compliance Override`, `Non-Negotiable`, `Analyst Notes`), and written
+to a dedicated **Analyst Evaluation** sheet in the XLSX export when
+overrides are present. Re-importing JSON or CSV restores every
+override to its original state, so analyst reviews can be handed off
+between reviewers or archived alongside the vendor submission.
+
 ### Compliance Plots
 
 Inside **Institution Evaluation** is a collapsible
@@ -250,14 +261,19 @@ sync with vendor answers and analyst overrides.
 
 ### Save Progress
 
-Click **Save Progress** in the left sidebar. Your responses are encrypted
-using **AES-256-GCM** (Web Crypto API) before being written to your browser's
+Click **Save Progress** in the left sidebar. Your responses **and any
+analyst overrides** (Importance Override, Compliance Override,
+Non-Negotiable flag, Analyst Notes set in the Institution Evaluation /
+Privacy Analyst Evaluation tabs) are encrypted together using
+**AES-256-GCM** (Web Crypto API) before being written to your browser's
 `localStorage`. The encryption key is stored only in `sessionStorage`
 (tab-scoped), meaning:
 
 - The stored data is ciphertext — unreadable without the session key
 - Closing the tab discards the session key; you will not be able to reload
   that specific save in a new tab or session
+- Legacy saves that predate the analyst-evaluation bundle still load; the
+  analyst overrides start empty and can be added fresh
 
 > **Important:** Because the session key is tab-scoped, always **Export JSON**
 > before closing your browser if you want to resume later. The JSON export
@@ -298,14 +314,7 @@ Exports a structured `.json` file containing:
     "exported": "2025-04-07T12:00:00.000Z",
     "notice": "This file contains sensitive assessment data..."
   },
-  "score": {
-    "earned": 840,
-    "pot": 1200,
-    "pct": 70,
-    "comp": 84,
-    "nc": 12,
-    "ci": 3
-  },
+  "score": { "earned": 840, "pot": 1200, "pct": 70, "comp": 84, "nc": 12, "ci": 3 },
   "responses": {
     "GNRL-01": {
       "question": "Solution Provider Name",
@@ -314,18 +323,31 @@ Exports a structured `.json` file containing:
       "importance": "",
       "primarySection": "start"
     }
+  },
+  "analystEvaluations": {
+    "AAAI-01": {
+      "question": "Are all systems...",
+      "impOverride": "Critical Importance",
+      "compOverride": "Mark as Non-Compliant",
+      "nonNeg": true,
+      "analystNotes": "Escalate — fails our SSO requirement."
+    }
   }
 }
 ```
 
 Use JSON for archiving, audit trails, or sharing with your information
-security team.
+security team. Re-importing the JSON restores both halves: vendor
+responses and analyst overrides.
 
 ### Export CSV
 
 Exports a `.csv` file with one row per question, including ID, question text,
-section, importance, response, notes, expected compliant response, and score
-mapping. Suitable for importing into spreadsheet tools.
+section, importance, response, notes, expected compliant response, score
+mapping, and the four analyst-override columns (Importance Override,
+Compliance Override, Non-Negotiable, Analyst Notes). Suitable for importing
+into spreadsheet tools and for round-tripping analyst overrides between
+reviewers. Re-importing the CSV restores both responses and overrides.
 
 > **Formula injection protection:** Any cell value beginning with `= + - @`
 > is automatically prefixed with a single quote so spreadsheet applications

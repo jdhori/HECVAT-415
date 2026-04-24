@@ -67,6 +67,44 @@ var HECVAT_SEC = (function () {
       .replace(/'/g,  '&#x27;');
   }
 
+  /* ── Validate a loaded analyst-evaluation record ─────────────
+     Analyst evaluations carry four fields:
+       impOverride:   '' | 'Minor Importance' | 'Standard Importance' | 'Critical Importance'
+       compOverride:  '' | 'Mark as Compliant' | 'Mark as Non-Compliant'
+       nonNeg:        boolean
+       analystNotes:  free text, same exec-tag rejection + length cap as notes
+     Returns a sanitised shallow copy, or null if the record is invalid.  */
+  var VALID_IMP  = {'':1,'Minor Importance':1,'Standard Importance':1,'Critical Importance':1};
+  var VALID_COMP = {'':1,'Mark as Compliant':1,'Mark as Non-Compliant':1};
+  function validateAERecord(qid, record) {
+    if (!/^[A-Z]{2,5}-\d{1,3}$/.test(qid)) return null;
+    if (!record || typeof record !== 'object') return null;
+    var out = {};
+    if (record.impOverride !== undefined) {
+      if (typeof record.impOverride !== 'string') return null;
+      if (!VALID_IMP.hasOwnProperty(record.impOverride)) return null;
+      if (record.impOverride) out.impOverride = record.impOverride;
+    }
+    if (record.compOverride !== undefined) {
+      if (typeof record.compOverride !== 'string') return null;
+      if (!VALID_COMP.hasOwnProperty(record.compOverride)) return null;
+      if (record.compOverride) out.compOverride = record.compOverride;
+    }
+    if (record.nonNeg !== undefined) {
+      if (typeof record.nonNeg !== 'boolean') return null;
+      if (record.nonNeg) out.nonNeg = true;
+    }
+    if (record.analystNotes !== undefined) {
+      if (typeof record.analystNotes !== 'string') return null;
+      if (record.analystNotes.length > 8000) return null;
+      var EXEC_TAG_AN = /<\s*\/?\s*(script|iframe|object|embed|form|input|button|link|meta|style|svg|math|details|dialog|template|base)[^a-z0-9]/i;
+      if (EXEC_TAG_AN.test(record.analystNotes)) return null;
+      if (record.analystNotes) out.analystNotes = record.analystNotes;
+    }
+    /* Return out only if at least one meaningful field is set */
+    return Object.keys(out).length ? out : null;
+  }
+
   /* ── Validate a loaded response record ───────────────────────── */
   var VALID_VALUES = { 'Yes': 1, 'No': 1, 'N/A': 1 };
   function validateRecord(qid, record) {
@@ -198,7 +236,7 @@ var HECVAT_SEC = (function () {
     sessionStorage.removeItem(SS_KEY);
   }
 
-  return { sanitize: sanitize, validateRecord: validateRecord, saveEncrypted: saveEncrypted, loadDecrypted: loadDecrypted, clearAll: clearAll };
+  return { sanitize: sanitize, validateRecord: validateRecord, validateAERecord: validateAERecord, saveEncrypted: saveEncrypted, loadDecrypted: loadDecrypted, clearAll: clearAll };
 }());
 
 (function () {
@@ -1469,8 +1507,12 @@ var HECVAT_SEC = (function () {
 
   function saveData() {
     setStatus('Saving\u2026', 'pending');
-    HECVAT_SEC.saveEncrypted(R).then(function () {
-      setStatus('Saved \u2014 AES-256-GCM encrypted', 'ok');
+    /* Persist both the vendor responses (R) and the analyst evaluations
+       (AE) together in a single envelope. Older saves (bare R map) stay
+       readable via the shape detection in loadData below. */
+    HECVAT_SEC.saveEncrypted({ responses: R, evaluations: AE }).then(function () {
+      var ann = Object.keys(AE).length;
+      setStatus('Saved \u2014 AES-256-GCM encrypted' + (ann ? ' (' + ann + ' analyst override(s) included)' : ''), 'ok');
     }).catch(function (e) {
       setStatus('Save failed: ' + e.message, 'error');
     });
@@ -1481,23 +1523,87 @@ var HECVAT_SEC = (function () {
     HECVAT_SEC.loadDecrypted().then(function (raw) {
       if (!raw) { setStatus('No saved data found.', ''); return; }
 
+      /* Detect envelope shape:
+           { responses: {...}, evaluations: {...} }   — new format
+           { qid: { value, notes }, ... }             — legacy bare map */
+      var rawR  = raw;
+      var rawAE = {};
+      if (raw && typeof raw === 'object' && raw.responses && typeof raw.responses === 'object' && !Array.isArray(raw.responses)) {
+        rawR  = raw.responses;
+        rawAE = (raw.evaluations && typeof raw.evaluations === 'object' && !Array.isArray(raw.evaluations)) ? raw.evaluations : {};
+      }
+
       /* Validate every record before accepting it */
-      var clean = {};
-      var dropped = 0;
-      Object.keys(raw).forEach(function (qid) {
-        var rec = HECVAT_SEC.validateRecord(qid, raw[qid]);
-        if (rec) { clean[qid] = rec; } else { dropped++; }
+      var cleanR = {}, cleanAE = {};
+      var droppedR = 0, droppedAE = 0;
+      Object.keys(rawR).forEach(function (qid) {
+        var rec = HECVAT_SEC.validateRecord(qid, rawR[qid]);
+        if (rec) { cleanR[qid] = rec; } else { droppedR++; }
+      });
+      Object.keys(rawAE).forEach(function (qid) {
+        var rec = HECVAT_SEC.validateAERecord(qid, rawAE[qid]);
+        if (rec) { cleanAE[qid] = rec; } else { droppedAE++; }
       });
 
-      R = clean;
+      R = cleanR;
+      AE = cleanAE;
       restoreUI();
+      restoreAE();
       refreshProgress();
       checkGates();
+      EVAL_SECS.forEach(function (es) { refreshEvalScorecard(es.id); });
+      if (typeof refreshHighRiskLists === 'function') refreshHighRiskLists();
 
-      var msg = 'Progress loaded' + (dropped ? ' (' + dropped + ' invalid record(s) discarded)' : '') + '.';
-      setStatus(msg, dropped ? 'warn' : 'ok');
+      var aeCount = Object.keys(AE).length;
+      var tail = '';
+      if (droppedR || droppedAE) tail = ' (' + (droppedR + droppedAE) + ' invalid record(s) discarded)';
+      else if (aeCount)          tail = ' (' + aeCount + ' analyst override(s) restored)';
+      setStatus('Progress loaded' + tail + '.', (droppedR || droppedAE) ? 'warn' : 'ok');
     }).catch(function (e) {
       setStatus('Load failed: ' + e.message, 'error');
+    });
+  }
+
+  /* ── Restore analyst-evaluation UI from the current AE state ──
+     For every analyst row that exists in the DOM, sync its Importance
+     Override select, Compliance Override select, Non-Negotiable
+     checkbox, analyst-notes textarea, compliance badge, and row tint
+     to whatever AE[qid] currently says. */
+  function restoreAE() {
+    Object.keys(AE).forEach(function (qid) {
+      var rec = AE[qid] || {};
+      EVAL_SECS.forEach(function (es) {
+        var impSel = document.getElementById('ae-imp-'  + es.id + '-' + qid);
+        var cmpSel = document.getElementById('ae-comp-' + es.id + '-' + qid);
+        var nnCb   = document.getElementById('ae-nn-'   + es.id + '-' + qid);
+        var notes  = document.getElementById('ae-notes-'+ es.id + '-' + qid);
+        var nnRow  = document.getElementById('ae-nn-row-'+ es.id + '-' + qid);
+        var row    = document.getElementById('arow-'    + es.id + '-' + qid);
+        var ans    = document.getElementById('avans-'   + es.id + '-' + qid);
+
+        if (impSel) {
+          impSel.value = rec.impOverride || '';
+          impSel.classList.toggle('override-set', !!rec.impOverride);
+        }
+        if (cmpSel) {
+          cmpSel.value = rec.compOverride || '';
+          cmpSel.classList.toggle('override-set', !!rec.compOverride);
+        }
+        if (nnCb)  { nnCb.checked = !!rec.nonNeg; }
+        if (nnRow) { nnRow.classList.toggle('checked', !!rec.nonNeg); }
+        if (row)   { row.classList.toggle('non-neg', !!rec.nonNeg); }
+        if (notes) { notes.value = rec.analystNotes || ''; }
+        /* Re-render the vendor-answer + compliance badge cluster so a
+           newly-loaded compliance override paints correctly. */
+        if (ans) {
+          var q = HECVAT_QUESTIONS.find(function (x) { return x.id === qid; });
+          if (q) {
+            ans.replaceChildren();
+            ans.appendChild(vendorAnsBadge(qid));
+            ans.appendChild(complianceBadge(q, rec.compOverride));
+          }
+        }
+      });
     });
   }
 
@@ -1564,7 +1670,8 @@ var HECVAT_SEC = (function () {
         notice: 'This file contains sensitive assessment data. Handle as confidential, transmit only over encrypted channels, and delete when no longer required.'
       },
       score: calcScore(),
-      responses: {}
+      responses: {},
+      analystEvaluations: {}
     };
     HECVAT_QUESTIONS.forEach(function (q) {
       if (R[q.id]) data.responses[q.id] = {
@@ -1572,6 +1679,18 @@ var HECVAT_SEC = (function () {
         notes: R[q.id].notes || '', importance: q.imp,
         primarySection: renderedIn[q.id] || q.sections[0]
       };
+      /* Only emit analyst blocks that actually carry a value to keep
+         the file tight. Skip ones where every field is empty/false. */
+      var ae = AE[q.id];
+      if (ae && (ae.impOverride || ae.compOverride || ae.nonNeg || ae.analystNotes)) {
+        data.analystEvaluations[q.id] = {
+          question: q.q,
+          impOverride:  ae.impOverride  || '',
+          compOverride: ae.compOverride || '',
+          nonNeg:       !!ae.nonNeg,
+          analystNotes: ae.analystNotes || ''
+        };
+      }
     });
     dl(JSON.stringify(data, null, 2), 'application/json', 'HECVAT-415-responses.json');
     setStatus('JSON exported \u2014 handle as confidential', 'warn');
@@ -1589,10 +1708,20 @@ var HECVAT_SEC = (function () {
       return '"' + s.replace(/"/g, '""') + '"';
     }
 
-    var rows = [['ID', 'Question', 'Primary Section', 'Importance', 'Response', 'Notes', 'Compliant Response', 'Score Mapping']];
+    var rows = [[
+      'ID', 'Question', 'Primary Section', 'Importance', 'Response', 'Notes',
+      'Compliant Response', 'Score Mapping',
+      'Importance Override', 'Compliance Override', 'Non-Negotiable', 'Analyst Notes'
+    ]];
     HECVAT_QUESTIONS.forEach(function (q) {
-      var r = R[q.id] || {};
-      rows.push([q.id, q.q, renderedIn[q.id] || q.sections[0], q.imp, r.value || '', r.notes || '', q.comp || '', q.score || '']);
+      var r  = R[q.id]  || {};
+      var ae = AE[q.id] || {};
+      rows.push([
+        q.id, q.q, renderedIn[q.id] || q.sections[0], q.imp,
+        r.value || '', r.notes || '', q.comp || '', q.score || '',
+        ae.impOverride || '', ae.compOverride || '',
+        ae.nonNeg ? 'Yes' : '', ae.analystNotes || ''
+      ]);
     });
     dl(rows.map(function (r) {
       return r.map(safeCsvCell).join(',');
@@ -1653,7 +1782,11 @@ var HECVAT_SEC = (function () {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         setStatus('JSON structure not recognised. Expected a HECVAT export file.', 'error'); return;
       }
-      applyImport(raw, file.name);
+      /* Pick up analyst evaluations if the file carries them. */
+      var rawAE = (parsed && typeof parsed.analystEvaluations === 'object' && !Array.isArray(parsed.analystEvaluations))
+                    ? parsed.analystEvaluations
+                    : null;
+      applyImport(raw, file.name, rawAE);
     };
     reader.readAsText(file);
   }
@@ -1670,20 +1803,22 @@ var HECVAT_SEC = (function () {
     var reader = new FileReader();
     reader.onerror = function () { setStatus('Could not read file.', 'error'); };
     reader.onload = function (ev) {
-      var raw;
-      try { raw = parseCSVToMap(ev.target.result); }
+      var parsed;
+      try { parsed = parseCSVToMap(ev.target.result); }
       catch (err) { setStatus('CSV error: ' + err.message, 'error'); return; }
-      applyImport(raw, file.name);
+      applyImport(parsed.responses, file.name, parsed.evaluations);
     };
     reader.readAsText(file);
   }
 
   /* RFC-4180 compliant CSV parser — handles multiline quoted fields,
      escaped double-quotes, and mixed line endings.
-     Returns { qid: { value, notes } } map.
+     Returns { responses: {...}, evaluations: {...} }.
      Expected columns (from exportCSV):
        0=ID  1=Question  2=PrimarySection  3=Importance
-       4=Response  5=Notes  6=CompliantResponse  7=ScoreMapping  */
+       4=Response  5=Notes  6=CompliantResponse  7=ScoreMapping
+       8=ImportanceOverride  9=ComplianceOverride
+      10=Non-Negotiable     11=AnalystNotes            (optional)     */
   function parseCSVToMap(text) {
     /* Normalise line endings but preserve newlines inside quoted fields */
     var src = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -1721,33 +1856,63 @@ var HECVAT_SEC = (function () {
     var idCol    = headers.indexOf('id');
     var valCol   = headers.indexOf('response');
     var notesCol = headers.indexOf('notes');
+    /* Analyst-override columns are optional — older CSV exports won't have them */
+    var impOvCol  = headers.indexOf('importance override');
+    var cmpOvCol  = headers.indexOf('compliance override');
+    var nnCol     = headers.indexOf('non-negotiable');
+    var anNoteCol = headers.indexOf('analyst notes');
 
     if (idCol === -1 || valCol === -1) {
       throw new Error('Required columns "ID" and "Response" not found. Ensure this is a HECVAT CSV export.');
     }
 
-    var map = {};
+    function stripInjectPrefix(s) {
+      if (s.charAt(0) === "'" && s.length > 1) return s.slice(1);
+      return s;
+    }
+
+    var responses = {}, evaluations = {};
     for (var li = 1; li < rows.length; li++) {
       var cells = rows[li];
       var qid   = (cells[idCol] || '').trim();
       if (!qid) continue;
+
+      /* Responses half */
       var entry = {};
-
-      /* Strip the formula-injection prefix quote added on export */
-      var val = (cells[valCol] || '').trim();
-      if (val.charAt(0) === "'" && val.length > 1) val = val.slice(1);
+      var val = stripInjectPrefix((cells[valCol] || '').trim());
       if (val) entry.value = val;
-
       if (notesCol > -1) {
-        var notes = (cells[notesCol] || '').trim();
-        if (notes.charAt(0) === "'" && notes.length > 1) notes = notes.slice(1);
+        var notes = stripInjectPrefix((cells[notesCol] || '').trim());
         if (notes) entry.notes = notes;
       }
+      if (entry.value !== undefined || entry.notes !== undefined) responses[qid] = entry;
 
-      if (entry.value !== undefined || entry.notes !== undefined) map[qid] = entry;
+      /* Analyst-evaluation half (only if any override column is present) */
+      if (impOvCol > -1 || cmpOvCol > -1 || nnCol > -1 || anNoteCol > -1) {
+        var aeEntry = {};
+        if (impOvCol > -1) {
+          var iv = stripInjectPrefix((cells[impOvCol] || '').trim());
+          if (iv) aeEntry.impOverride = iv;
+        }
+        if (cmpOvCol > -1) {
+          var cv = stripInjectPrefix((cells[cmpOvCol] || '').trim());
+          if (cv) aeEntry.compOverride = cv;
+        }
+        if (nnCol > -1) {
+          var nv = stripInjectPrefix((cells[nnCol] || '').trim()).toLowerCase();
+          if (nv === 'yes' || nv === 'true' || nv === '1') aeEntry.nonNeg = true;
+        }
+        if (anNoteCol > -1) {
+          var an = stripInjectPrefix((cells[anNoteCol] || '').trim());
+          if (an) aeEntry.analystNotes = an;
+        }
+        if (Object.keys(aeEntry).length) evaluations[qid] = aeEntry;
+      }
     }
-    if (Object.keys(map).length === 0) throw new Error('No response data found in CSV.');
-    return map;
+    if (Object.keys(responses).length === 0 && Object.keys(evaluations).length === 0) {
+      throw new Error('No response or analyst-evaluation data found in CSV.');
+    }
+    return { responses: responses, evaluations: evaluations };
   }
 
   /* ================================================================
@@ -1859,25 +2024,38 @@ var HECVAT_SEC = (function () {
     if (!Object.keys(map).length) throw new Error('No answers found in this file.');
     return map;
   }
-  function applyImport(raw, fileName) {
+  function applyImport(raw, fileName, rawAE) {
     var clean = {}, accepted = 0, dropped = 0;
-    Object.keys(raw).forEach(function (qid) {
+    Object.keys(raw || {}).forEach(function (qid) {
       var rec = HECVAT_SEC.validateRecord(qid, raw[qid]);
       if (rec) { clean[qid] = rec; accepted++; } else { dropped++; }
     });
 
-    if (accepted === 0) {
-      setStatus('No valid responses found in ' + HECVAT_SEC.sanitize(fileName) + '.', 'error');
+    /* Optional analyst-evaluation import */
+    var cleanAE = {}, aeAccepted = 0, aeDropped = 0;
+    if (rawAE && typeof rawAE === 'object' && !Array.isArray(rawAE)) {
+      Object.keys(rawAE).forEach(function (qid) {
+        var rec = HECVAT_SEC.validateAERecord(qid, rawAE[qid]);
+        if (rec) { cleanAE[qid] = rec; aeAccepted++; } else { aeDropped++; }
+      });
+    }
+
+    if (accepted === 0 && aeAccepted === 0) {
+      setStatus('No valid responses or analyst evaluations found in ' + HECVAT_SEC.sanitize(fileName) + '.', 'error');
       return;
     }
 
-    /* Warn before overwriting existing answers */
-    var existing = Object.keys(R).filter(function (k) { return R[k] && R[k].value; }).length;
-    if (existing > 0) {
+    /* Warn before overwriting existing answers or overrides */
+    var existing   = Object.keys(R).filter(function (k) { return R[k] && R[k].value; }).length;
+    var existingAE = Object.keys(AE).length;
+    if (existing > 0 || existingAE > 0) {
+      var parts = [];
+      if (existing)   parts.push(existing + ' existing answer(s)');
+      if (existingAE) parts.push(existingAE + ' existing analyst override(s)');
       var ok = window.confirm(
-        'You have ' + existing + ' existing answer(s).\n\n' +
-        'Importing will merge the file with your current answers.\n' +
-        'Imported values overwrite any conflicting existing answers.\n\nContinue?'
+        'You have ' + parts.join(' and ') + '.\n\n' +
+        'Importing will merge the file with your current state.\n' +
+        'Imported values overwrite any conflicting existing values.\n\nContinue?'
       );
       if (!ok) { setStatus('Import cancelled.', ''); return; }
     }
@@ -1888,14 +2066,31 @@ var HECVAT_SEC = (function () {
       if (clean[qid].value !== undefined) R[qid].value = clean[qid].value;
       if (clean[qid].notes !== undefined) R[qid].notes = clean[qid].notes;
     });
+    Object.keys(cleanAE).forEach(function (qid) {
+      AE[qid] = AE[qid] || {};
+      var inc = cleanAE[qid];
+      if (inc.impOverride  !== undefined) AE[qid].impOverride  = inc.impOverride;
+      if (inc.compOverride !== undefined) AE[qid].compOverride = inc.compOverride;
+      if (inc.nonNeg       !== undefined) AE[qid].nonNeg       = inc.nonNeg;
+      if (inc.analystNotes !== undefined) AE[qid].analystNotes = inc.analystNotes;
+    });
 
     restoreUI();
+    if (aeAccepted > 0) restoreAE();
     refreshProgress();
     checkGates();
+    if (aeAccepted > 0) {
+      EVAL_SECS.forEach(function (es) { refreshEvalScorecard(es.id); });
+      if (typeof refreshHighRiskLists === 'function') refreshHighRiskLists();
+    }
 
-    var msg = 'Imported ' + accepted + ' response(s) from ' + HECVAT_SEC.sanitize(fileName)
-              + (dropped ? ' \u2014 ' + dropped + ' invalid record(s) skipped.' : '.');
-    setStatus(msg, dropped ? 'warn' : 'ok');
+    var parts2 = [];
+    if (accepted)   parts2.push(accepted + ' response(s)');
+    if (aeAccepted) parts2.push(aeAccepted + ' analyst override(s)');
+    var skipped = dropped + aeDropped;
+    var msg = 'Imported ' + parts2.join(' and ') + ' from ' + HECVAT_SEC.sanitize(fileName)
+              + (skipped ? ' \u2014 ' + skipped + ' invalid record(s) skipped.' : '.');
+    setStatus(msg, skipped ? 'warn' : 'ok');
   }
 
   /* ================================================================
@@ -1994,6 +2189,39 @@ var HECVAT_SEC = (function () {
       ws['!freeze'] = { xSplit: 0, ySplit: 2 };
       XLSX.utils.book_append_sheet(wb, ws, def.name);
     });
+
+    /* ── Analyst Evaluation sheet (only if any overrides are set) ── */
+    var aeKeys = Object.keys(AE).filter(function (qid) {
+      var ae = AE[qid];
+      return ae && (ae.impOverride || ae.compOverride || ae.nonNeg || ae.analystNotes);
+    });
+    if (aeKeys.length) {
+      var aeRows = [
+        ['HECVAT 4.1.5 \u2014 Analyst Evaluation',
+         'Exported: ' + new Date().toLocaleDateString(),
+         'Institution / Privacy Analyst overrides applied to the vendor response',
+         '', '', ''],
+        ['Question ID', 'Question',
+         'Importance Override', 'Compliance Override',
+         'Non-Negotiable', 'Analyst Notes'],
+      ];
+      aeKeys.forEach(function (qid) {
+        var q = HECVAT_QUESTIONS.find(function (x) { return x.id === qid; });
+        if (!q) return;
+        var ae = AE[qid];
+        aeRows.push([
+          qid, q.q,
+          ae.impOverride  || '',
+          ae.compOverride || '',
+          ae.nonNeg ? 'Yes' : '',
+          ae.analystNotes || ''
+        ]);
+      });
+      var wsAE = XLSX.utils.aoa_to_sheet(aeRows);
+      wsAE['!cols'] = [{wch:12},{wch:65},{wch:22},{wch:24},{wch:16},{wch:50}];
+      wsAE['!freeze'] = { xSplit: 0, ySplit: 2 };
+      XLSX.utils.book_append_sheet(wb, wsAE, 'Analyst Evaluation');
+    }
 
     /* Trigger download */
     var today = new Date().toISOString().slice(0,10);
