@@ -2382,9 +2382,16 @@ var HECVAT_SEC = (function () {
   }
 
   function refreshEvalScorecard(evalId) {
-    if (evalId === 'inst-eval')    refreshInstScorecard();
+    if (evalId === 'inst-eval')    { refreshInstScorecard(); refreshCompliancePlotsIfOpen(); }
     else if (evalId === 'high-risk')    refreshHighRiskScorecard();
     else if (evalId === 'privacy-eval') refreshPrivacyScorecard();
+  }
+
+  /* Only re-render plots if their panel is currently expanded, to avoid
+     wasted work on every keystroke while the user isn't looking at them. */
+  function refreshCompliancePlotsIfOpen() {
+    var tog = document.getElementById('compliance-plots-tog');
+    if (tog && tog.getAttribute('aria-expanded') === 'true') renderCompliancePlots();
   }
 
   /* ================================================================
@@ -2555,6 +2562,342 @@ var HECVAT_SEC = (function () {
   }
 
   /* ================================================================
+     VISUAL COMPLIANCE PLOTS (native SVG — no external libs, CSP-safe)
+
+     Renders two complementary charts on the Institution Evaluation tab:
+
+     1. Compliance proportion by category, with 95% Wilson-score
+        confidence-interval error bars (so you can read whether two
+        categories' compliance rates differ significantly — if the
+        intervals don't overlap, the difference is significant).
+
+     2. Stacked answer composition by category (Compliant / Non-Compliant
+        / N-A / Unanswered) so you can see the volume of responses
+        behind each compliance rate at a glance.
+  ================================================================ */
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  function svgText(content, attrs) {
+    var t = svgEl('text', attrs || {});
+    t.appendChild(document.createTextNode(content));
+    return t;
+  }
+
+  /* Wilson score 95% CI for a proportion. Returns {lo, hi} in [0,1]. */
+  function wilsonCI(successes, trials) {
+    if (trials <= 0) return { lo: 0, hi: 0, p: 0 };
+    var z = 1.96;
+    var p = successes / trials;
+    var denom = 1 + (z * z) / trials;
+    var centre = (p + (z * z) / (2 * trials)) / denom;
+    var half   = (z * Math.sqrt((p * (1 - p) + (z * z) / (4 * trials)) / trials)) / denom;
+    return { lo: Math.max(0, centre - half),
+             hi: Math.min(1, centre + half),
+             p:  p };
+  }
+
+  /* Compute per-category answer counts from current responses R. */
+  function computeCategoryStats() {
+    var catMap = {};
+    HECVAT_QUESTIONS.forEach(function (q) {
+      if (q.loc === 'Not Scored' || q.score === 'NA') return;
+      if (!(q.comp === 'Yes' || q.comp === 'No')) return; // only scorable yes/no questions
+      var cat = q.id.slice(0, 4);
+      if (!catMap[cat]) catMap[cat] = { comp: 0, nc: 0, na: 0, unans: 0, total: 0 };
+      var v = R[q.id] && R[q.id].value;
+      catMap[cat].total++;
+      if (!v)                         catMap[cat].unans++;
+      else if (v === 'N/A')           catMap[cat].na++;
+      else if (v === q.comp)          catMap[cat].comp++;
+      else                            catMap[cat].nc++;
+    });
+    return catMap;
+  }
+
+  function buildCompliancePlots() {
+    var sec = mk('div', 'cat-sec stat-methods-ref');
+    var h3  = mk('h3', 'cat-h3');
+    var togBtn = mk('button', 'cat-tog'); togBtn.type = 'button';
+    togBtn.id = 'compliance-plots-tog';
+    var bodyId = 'compliance-plots-body';
+    attr(togBtn, 'aria-expanded', 'false');
+    attr(togBtn, 'aria-controls', bodyId);
+
+    var togLbl = mk('span', 'cat-tog-lbl');
+    togLbl.appendChild(txt('\uD83D\uDCC8 Compliance Plots \u2014 By Category (95% CI)'));
+    togBtn.appendChild(togLbl);
+    var togIcon = mk('span', 'cat-tog-icon'); attr(togIcon, 'aria-hidden', 'true');
+    togIcon.textContent = '\u25B8'; togBtn.appendChild(togIcon);
+    h3.appendChild(togBtn);
+    sec.appendChild(h3);
+
+    var body = mk('div', 'cat-body cat-collapsed plots-body');
+    body.id = bodyId;
+    attr(body, 'role', 'region');
+    attr(body, 'aria-labelledby', 'compliance-plots-tog');
+
+    var intro = mk('p', 'stat-intro');
+    intro.appendChild(txt(
+      'Each bar is the compliance proportion for that category\u2019s scorable ' +
+      'Yes/No questions. The whiskers are the 95% Wilson-score confidence ' +
+      'interval \u2014 if two categories\u2019 intervals do not overlap, the ' +
+      'difference between their compliance rates is statistically significant ' +
+      'at the 0.05 level. The second chart shows the raw answer composition ' +
+      'behind each rate so you can judge whether a narrow interval is driven ' +
+      'by a large sample or a very uniform response.'
+    ));
+    body.appendChild(intro);
+
+    var chart1Wrap = mk('div', 'plot-wrap'); chart1Wrap.id = 'plot-ci-wrap';
+    var chart1Ttl = mk('div', 'plot-title');
+    chart1Ttl.appendChild(txt('Compliance proportion by category (with 95% CI)'));
+    chart1Wrap.appendChild(chart1Ttl);
+    var chart1 = mk('div', 'plot-svg-host'); chart1.id = 'plot-ci';
+    chart1Wrap.appendChild(chart1);
+    body.appendChild(chart1Wrap);
+
+    var chart2Wrap = mk('div', 'plot-wrap'); chart2Wrap.id = 'plot-stack-wrap';
+    var chart2Ttl = mk('div', 'plot-title');
+    chart2Ttl.appendChild(txt('Answer composition by category'));
+    chart2Wrap.appendChild(chart2Ttl);
+    var chart2 = mk('div', 'plot-svg-host'); chart2.id = 'plot-stack';
+    chart2Wrap.appendChild(chart2);
+    body.appendChild(chart2Wrap);
+
+    /* Legend */
+    var legend = mk('div', 'plot-legend');
+    [
+      ['plot-comp',   'Compliant'],
+      ['plot-nc',     'Non-Compliant'],
+      ['plot-na',     'N/A'],
+      ['plot-unans',  'Unanswered'],
+    ].forEach(function (e) {
+      var li = mk('span', 'plot-legend-item');
+      var sw = mk('span', 'plot-legend-sw ' + e[0]);
+      li.appendChild(sw); li.appendChild(txt(e[1])); legend.appendChild(li);
+    });
+    body.appendChild(legend);
+
+    sec.appendChild(body);
+
+    togBtn.addEventListener('click', function () {
+      var open = togBtn.getAttribute('aria-expanded') === 'true';
+      attr(togBtn, 'aria-expanded', String(!open));
+      body.classList.toggle('cat-collapsed', open);
+      togIcon.textContent = open ? '\u25B8' : '\u25BE';
+      /* Render on first open, and on every subsequent open in case data changed */
+      if (!open) renderCompliancePlots();
+    });
+
+    return sec;
+  }
+
+  /* (Re)render both charts into their SVG hosts using current responses. */
+  function renderCompliancePlots() {
+    var host1 = document.getElementById('plot-ci');
+    var host2 = document.getElementById('plot-stack');
+    if (!host1 || !host2) return;
+
+    var stats = computeCategoryStats();
+    var cats  = Object.keys(stats).filter(function (c) { return stats[c].total > 0; });
+    /* Sort categories by compliance rate desc so the chart reads top-down */
+    cats.sort(function (a, b) {
+      var pa = stats[a].total ? stats[a].comp / Math.max(1, stats[a].comp + stats[a].nc) : 0;
+      var pb = stats[b].total ? stats[b].comp / Math.max(1, stats[b].comp + stats[b].nc) : 0;
+      return pb - pa;
+    });
+
+    /* Empty-state */
+    host1.replaceChildren(); host2.replaceChildren();
+    if (!cats.length) {
+      var msg1 = mk('div', 'plot-empty'); msg1.appendChild(txt('No scorable categories yet \u2014 answer a few Yes/No questions to populate the chart.'));
+      host1.appendChild(msg1);
+      var msg2 = mk('div', 'plot-empty'); msg2.appendChild(txt('Nothing to stack yet.'));
+      host2.appendChild(msg2);
+      return;
+    }
+
+    /* ───── Chart 1: bars + 95% CI error bars ───── */
+    var W = Math.max(560, 48 * cats.length + 100);
+    var H = 320, PAD_L = 48, PAD_B = 70, PAD_T = 14, PAD_R = 14;
+    var chartW = W - PAD_L - PAD_R;
+    var chartH = H - PAD_T - PAD_B;
+    var barW = Math.max(14, chartW / cats.length * 0.65);
+    var step = chartW / cats.length;
+
+    var svg = svgEl('svg', {
+      'viewBox': '0 0 ' + W + ' ' + H,
+      'role': 'img',
+      'aria-label': 'Compliance proportion by category with 95% confidence intervals',
+      'class': 'plot-svg'
+    });
+
+    /* y-axis grid + labels (0%, 25%, 50%, 75%, 100%) */
+    for (var i = 0; i <= 4; i++) {
+      var gy = PAD_T + chartH - (i / 4) * chartH;
+      svg.appendChild(svgEl('line', {
+        x1: PAD_L, x2: W - PAD_R, y1: gy, y2: gy,
+        'class': 'plot-grid'
+      }));
+      svg.appendChild(svgText((i * 25) + '%', {
+        x: PAD_L - 6, y: gy + 3, 'text-anchor': 'end', 'class': 'plot-axis-lbl'
+      }));
+    }
+    /* y-axis title */
+    var yTitle = svgText('Compliance %', {
+      x: 12, y: PAD_T + chartH / 2, 'text-anchor': 'middle',
+      'class': 'plot-axis-title',
+      transform: 'rotate(-90 12 ' + (PAD_T + chartH / 2) + ')'
+    });
+    svg.appendChild(yTitle);
+
+    cats.forEach(function (cat, idx) {
+      var s = stats[cat];
+      var answered = s.comp + s.nc;              // denominator for Wilson CI (exclude N/A, unanswered)
+      var ci = wilsonCI(s.comp, answered);
+      var cx = PAD_L + step * idx + step / 2;
+
+      /* Bar */
+      var barH = ci.p * chartH;
+      var by = PAD_T + chartH - barH;
+      svg.appendChild(svgEl('rect', {
+        x: cx - barW / 2, y: by, width: barW, height: barH,
+        'class': 'plot-bar'
+      }));
+
+      /* Error bar (CI) */
+      if (answered > 0) {
+        var yHi = PAD_T + chartH - ci.hi * chartH;
+        var yLo = PAD_T + chartH - ci.lo * chartH;
+        svg.appendChild(svgEl('line', {
+          x1: cx, x2: cx, y1: yHi, y2: yLo, 'class': 'plot-err'
+        }));
+        svg.appendChild(svgEl('line', {
+          x1: cx - 6, x2: cx + 6, y1: yHi, y2: yHi, 'class': 'plot-err'
+        }));
+        svg.appendChild(svgEl('line', {
+          x1: cx - 6, x2: cx + 6, y1: yLo, y2: yLo, 'class': 'plot-err'
+        }));
+      }
+
+      /* Percentage label above bar */
+      var pctLbl = answered > 0 ? Math.round(ci.p * 100) + '%' : 'n/a';
+      svg.appendChild(svgText(pctLbl, {
+        x: cx,
+        y: Math.max(PAD_T + 10, by - 6),
+        'text-anchor': 'middle',
+        'class': 'plot-val-lbl'
+      }));
+
+      /* Category label (rotated 35°) */
+      var lbl = svgText(cat, {
+        x: cx,
+        y: PAD_T + chartH + 14,
+        'text-anchor': 'end',
+        'class': 'plot-axis-lbl',
+        transform: 'rotate(-35 ' + cx + ' ' + (PAD_T + chartH + 14) + ')'
+      });
+      /* Append a tooltip with the full category name + n */
+      var fullName = (typeof CAT_FULL !== 'undefined' && CAT_FULL[cat]) || cat;
+      var ttl = svgEl('title'); ttl.textContent = fullName + ' \u2014 n=' + answered;
+      lbl.appendChild(ttl);
+      svg.appendChild(lbl);
+    });
+
+    /* x-axis baseline */
+    svg.appendChild(svgEl('line', {
+      x1: PAD_L, x2: W - PAD_R, y1: PAD_T + chartH, y2: PAD_T + chartH,
+      'class': 'plot-axis-line'
+    }));
+
+    host1.appendChild(svg);
+
+    /* ───── Chart 2: stacked composition ───── */
+    var W2 = W, H2 = 260, PAD_L2 = 48, PAD_B2 = 70, PAD_T2 = 14, PAD_R2 = 14;
+    var chartW2 = W2 - PAD_L2 - PAD_R2;
+    var chartH2 = H2 - PAD_T2 - PAD_B2;
+    var step2 = chartW2 / cats.length;
+    var barW2 = Math.max(14, step2 * 0.65);
+
+    var svg2 = svgEl('svg', {
+      'viewBox': '0 0 ' + W2 + ' ' + H2,
+      'role': 'img',
+      'aria-label': 'Answer composition by category',
+      'class': 'plot-svg'
+    });
+
+    /* Max questions across categories for y-axis scaling */
+    var maxN = cats.reduce(function (m, c) { return Math.max(m, stats[c].total); }, 1);
+    /* Gridlines at 0, 25%, 50%, 75%, 100% of maxN */
+    for (var j = 0; j <= 4; j++) {
+      var gy2 = PAD_T2 + chartH2 - (j / 4) * chartH2;
+      svg2.appendChild(svgEl('line', {
+        x1: PAD_L2, x2: W2 - PAD_R2, y1: gy2, y2: gy2, 'class': 'plot-grid'
+      }));
+      svg2.appendChild(svgText(String(Math.round((j / 4) * maxN)), {
+        x: PAD_L2 - 6, y: gy2 + 3, 'text-anchor': 'end', 'class': 'plot-axis-lbl'
+      }));
+    }
+    svg2.appendChild(svgText('Questions', {
+      x: 12, y: PAD_T2 + chartH2 / 2, 'text-anchor': 'middle',
+      'class': 'plot-axis-title',
+      transform: 'rotate(-90 12 ' + (PAD_T2 + chartH2 / 2) + ')'
+    }));
+
+    cats.forEach(function (cat, idx) {
+      var s = stats[cat];
+      var cx = PAD_L2 + step2 * idx + step2 / 2;
+      var segs = [
+        { key: 'plot-comp',  n: s.comp },
+        { key: 'plot-nc',    n: s.nc },
+        { key: 'plot-na',    n: s.na },
+        { key: 'plot-unans', n: s.unans },
+      ];
+      var cum = 0;
+      segs.forEach(function (seg) {
+        if (seg.n <= 0) return;
+        var segH = (seg.n / maxN) * chartH2;
+        var segY = PAD_T2 + chartH2 - ((cum + seg.n) / maxN) * chartH2;
+        svg2.appendChild(svgEl('rect', {
+          x: cx - barW2 / 2, y: segY, width: barW2, height: segH,
+          'class': 'plot-seg ' + seg.key
+        }));
+        cum += seg.n;
+      });
+      /* Total-n label above */
+      svg2.appendChild(svgText('n=' + s.total, {
+        x: cx,
+        y: PAD_T2 + chartH2 - (s.total / maxN) * chartH2 - 4,
+        'text-anchor': 'middle',
+        'class': 'plot-val-lbl'
+      }));
+      /* Category label */
+      var lbl2 = svgText(cat, {
+        x: cx,
+        y: PAD_T2 + chartH2 + 14,
+        'text-anchor': 'end',
+        'class': 'plot-axis-lbl',
+        transform: 'rotate(-35 ' + cx + ' ' + (PAD_T2 + chartH2 + 14) + ')'
+      });
+      var fullName2 = (typeof CAT_FULL !== 'undefined' && CAT_FULL[cat]) || cat;
+      var ttl2 = svgEl('title'); ttl2.textContent = fullName2;
+      lbl2.appendChild(ttl2);
+      svg2.appendChild(lbl2);
+    });
+
+    svg2.appendChild(svgEl('line', {
+      x1: PAD_L2, x2: W2 - PAD_R2, y1: PAD_T2 + chartH2, y2: PAD_T2 + chartH2,
+      'class': 'plot-axis-line'
+    }));
+
+    host2.appendChild(svg2);
+  }
+
+  /* ================================================================
      BUILD ALL EVAL PANELS
   ================================================================ */
   function buildEvalSections() {
@@ -2616,6 +2959,9 @@ var HECVAT_SEC = (function () {
 
         /* Statistical methods reference — collapsible, collapsed by default */
         body.appendChild(buildStatMethodsRef());
+
+        /* Visual compliance plots — collapsible, collapsed by default */
+        body.appendChild(buildCompliancePlots());
 
         /* Expand/Collapse all button bar */
         var expandBar = mk('div','ie-expand-bar');

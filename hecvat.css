@@ -1157,6 +1157,58 @@ h2.snav-hd-eval { background: #1e3a5f; }
 [data-theme="dark"] .sync-lbl { color: var(--text2); }
 
 /* ================================================================
+   COMPLIANCE PLOTS PANEL (Institution Evaluation)
+================================================================ */
+.plots-body { padding: .9rem 1.2rem 1.1rem 1.2rem; background: var(--g1); border-left: 3px solid var(--navy2); }
+.plot-wrap  { margin-top: .9rem; }
+.plot-wrap:first-of-type { margin-top: .2rem; }
+.plot-title { font-size: .8rem; font-weight: 700; color: var(--navy2); margin-bottom: .35rem; }
+.plot-svg-host { width: 100%; overflow-x: auto; background: var(--white); border: 1px solid var(--g2); border-radius: 3px; padding: .35rem; }
+.plot-svg { width: 100%; height: auto; display: block; font-family: var(--font); }
+.plot-empty { font-size: .78rem; color: var(--g4); font-style: italic; padding: 1.2rem .6rem; text-align: center; }
+
+.plot-grid       { stroke: #dcdcd3; stroke-width: 1; stroke-dasharray: 2 3; }
+.plot-axis-line  { stroke: #7a7a70; stroke-width: 1; }
+.plot-axis-lbl   { font-size: 10px; fill: var(--text2); }
+.plot-axis-title { font-size: 11px; font-weight: 700; fill: var(--navy2); }
+.plot-val-lbl    { font-size: 10px; font-weight: 700; fill: var(--text); }
+.plot-bar        { fill: #15803d; opacity: .88; }
+.plot-err        { stroke: #1a1a1a; stroke-width: 1.5; }
+
+.plot-seg        { opacity: .94; }
+.plot-seg.plot-comp   { fill: #15803d; }
+.plot-seg.plot-nc     { fill: #b91c1c; }
+.plot-seg.plot-na     { fill: #78350f; }
+.plot-seg.plot-unans  { fill: #c0c0b8; }
+
+.plot-legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: .7rem; font-size: .74rem; color: var(--text2); }
+.plot-legend-item { display: inline-flex; align-items: center; gap: .3rem; }
+.plot-legend-sw   { width: 12px; height: 12px; display: inline-block; border-radius: 2px; }
+.plot-legend-sw.plot-comp  { background: #15803d; }
+.plot-legend-sw.plot-nc    { background: #b91c1c; }
+.plot-legend-sw.plot-na    { background: #78350f; }
+.plot-legend-sw.plot-unans { background: #c0c0b8; }
+
+[data-theme="dark"] .plots-body   { background: var(--g2); border-left-color: var(--gold2); }
+[data-theme="dark"] .plot-svg-host{ background: var(--panel-bg); border-color: var(--g3); }
+[data-theme="dark"] .plot-title   { color: var(--gold2); }
+[data-theme="dark"] .plot-grid    { stroke: #3a3a36; }
+[data-theme="dark"] .plot-axis-line { stroke: #8a8a80; }
+[data-theme="dark"] .plot-axis-lbl  { fill: var(--text2); }
+[data-theme="dark"] .plot-axis-title{ fill: var(--gold2); }
+[data-theme="dark"] .plot-val-lbl   { fill: var(--text); }
+[data-theme="dark"] .plot-bar       { fill: #1ea555; opacity: .95; }
+[data-theme="dark"] .plot-err       { stroke: #e8e8e2; stroke-width: 1.5; }
+[data-theme="dark"] .plot-seg.plot-comp  { fill: #1ea555; }
+[data-theme="dark"] .plot-seg.plot-nc    { fill: #e04040; }
+[data-theme="dark"] .plot-seg.plot-na    { fill: #d97706; }
+[data-theme="dark"] .plot-seg.plot-unans { fill: #5a5a55; }
+[data-theme="dark"] .plot-legend-sw.plot-comp  { background: #1ea555; }
+[data-theme="dark"] .plot-legend-sw.plot-nc    { background: #e04040; }
+[data-theme="dark"] .plot-legend-sw.plot-na    { background: #d97706; }
+[data-theme="dark"] .plot-legend-sw.plot-unans { background: #5a5a55; }
+
+/* ================================================================
    STATISTICAL METHODS REFERENCE PANEL (Institution Evaluation)
 ================================================================ */
 .stat-methods-ref { margin: .6rem 1.5rem 1rem 1.5rem; }
