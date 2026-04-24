@@ -621,59 +621,59 @@ textarea { resize: vertical; min-height: 70px; }
 
 .ynb {
   flex: 1;
-  padding: .42rem .25rem;
-  /* Unselected: match the neutral tip/guide look (.qguide uses g1 bg +
-     g3 left border) so the buttons read as part of the question card.
-     Selection switches them to their signature color. */
-  border: 1.5px solid var(--g2);
-  border-left: 3px solid var(--g3);
-  border-radius: 3px;
-  background: var(--g1);
+  padding: .48rem .3rem;
+  border-radius: 4px;
   font-family: var(--font);
-  font-size: .76rem;
-  font-weight: 600;
+  font-size: .78rem;
+  font-weight: 700;
   cursor: pointer;
-  color: var(--text2);
   transition: all .12s;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: .22rem;
   position: relative;
+  border-width: 2px;
+  border-style: solid;
   /* Question label is in aria-label — visually we show only icon+word */
 }
-.ynb:hover     { background: var(--g2); }
-/* Selected state — solid colored box, bold white text, heavy ring.
-   !important used defensively so nothing (theme overrides, specificity
-   from other rules, per-instance rules) can wash out the selection. */
+
+/* Yes button — always green tinted, deeper saturation on hover/selected.
+   Unselected uses a pale green fill with a green border + dark green text
+   so the affirmative meaning of the button is visible at rest. */
+.ynb-yes {
+  background: #dcfce7;
+  border-color: #15803d;
+  color: #0b5a2a;
+}
+.ynb-yes:hover { background: #bbf7d0; }
+
+/* No button — always red tinted. */
+.ynb-no {
+  background: #fee2e2;
+  border-color: #b91c1c;
+  color: #7f1414;
+}
+.ynb-no:hover { background: #fecaca; }
+
+/* Selected state — solid saturated box, bold white text, heavy ring.
+   !important ensures no theme or override specificity dulls the state. */
 .ynb.sel-y,
-.ynb.sel-n,
-.ynb.sel-na {
+.ynb.sel-n {
   color: #ffffff !important;
   font-weight: 800 !important;
   border-width: 3px !important;
-  border-style: solid !important;
   box-shadow: 0 0 0 3px rgba(0,0,0,.22) inset, 0 3px 6px rgba(0,0,0,.28) !important;
   transform: translateY(-1px);
 }
-.ynb.sel-y  { background: #15803d !important; border-color: #0b5a2a !important; }
-.ynb.sel-n  { background: #b91c1c !important; border-color: #7f1414 !important; }
-.ynb.sel-na {
-  background-color: #6b6b66 !important;
-  border-color: #45453f !important;
-  /* Repeating question-mark pattern over the grey fill */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.22)'>?</text></svg>") !important;
-  background-repeat: repeat !important;
-  background-size: 22px 22px !important;
-}
+.ynb.sel-y { background: #15803d !important; border-color: #0b5a2a !important; }
+.ynb.sel-n { background: #b91c1c !important; border-color: #7f1414 !important; }
 /* Inner icon span — make sure it picks up white too */
-.ynb.sel-y  > *,
-.ynb.sel-n  > *,
-.ynb.sel-na > * { color: #ffffff !important; }
+.ynb.sel-y > *,
+.ynb.sel-n > * { color: #ffffff !important; }
 /* Selected marker pip in the top-right corner for extra clarity */
 .ynb.sel-y::after,
-.ynb.sel-n::after,
-.ynb.sel-na::after {
+.ynb.sel-n::after {
   content: "\2713";
   position: absolute;
   top: 2px;
@@ -686,7 +686,7 @@ textarea { resize: vertical; min-height: 70px; }
 }
 
 /* ── Compliance indicator — solid filled pop-ups that match the selected
-      Yes/No/NA button styling so users can associate the two visually. ── */
+      Yes/No button styling so users can associate the two visually. ── */
 .cind {
   font-size: .72rem;
   font-weight: 800;
@@ -701,14 +701,6 @@ textarea { resize: vertical; min-height: 70px; }
 .cind.on  { display: block; }
 .cind.ok  { background: #15803d !important; color: #ffffff !important; border-color: #0b5a2a !important; }
 .cind.bad { background: #b91c1c !important; color: #ffffff !important; border-color: #7f1414 !important; }
-.cind.neu {
-  background-color: #6b6b66 !important;
-  color: #ffffff !important;
-  border-color: #45453f !important;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.22)'>?</text></svg>") !important;
-  background-repeat: repeat !important;
-  background-size: 22px 22px !important;
-}
 
 /* ── Notes toggle ── */
 .ntog {
@@ -1225,38 +1217,24 @@ h2.snav-hd-eval { background: #1e3a5f; }
 [data-theme="dark"] .qmeta        { color: var(--g4); }
 [data-theme="dark"] .qtext        { color: var(--text); }
 
-/* Yes/No/NA buttons */
-[data-theme="dark"] .ynb          { background: var(--g1); border-color: var(--g2); border-left-color: var(--g3); color: var(--text2); }
-[data-theme="dark"] .ynb:hover    { background: var(--g2); }
-/* Dark mode: compliance pop-ups keep the same saturated fills for
-   consistent visual association with the selected button color. */
+/* Yes / No buttons — dark theme */
+[data-theme="dark"] .ynb-yes         { background: #0f3a22; border-color: #1ea555; color: #86efac; }
+[data-theme="dark"] .ynb-yes:hover   { background: #14532d; }
+[data-theme="dark"] .ynb-no          { background: #3a1010; border-color: #e04040; color: #fca5a5; }
+[data-theme="dark"] .ynb-no:hover    { background: #4a1414; }
+
+/* Dark-mode compliance pop-ups: brighter fills, matching the button
+   selected state so the association holds across themes. */
 [data-theme="dark"] .cind.ok  { background: #1ea555 !important; color: #ffffff !important; border-color: #0f5a2b !important; }
 [data-theme="dark"] .cind.bad { background: #e04040 !important; color: #ffffff !important; border-color: #7a1313 !important; }
-[data-theme="dark"] .cind.neu {
-  background-color: #5a5a55 !important;
-  color: #ffffff !important;
-  border-color: #2e2e2a !important;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.35)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text></svg>") !important;
-  background-repeat: repeat !important;
-  background-size: 22px 22px !important;
-}
-/* Dark mode keeps the same solid boxes — bright, easy to see on dark bg */
-[data-theme="dark"] .ynb.sel-y    { background: #1ea555 !important; border-color: #0f5a2b !important; color: #ffffff !important; }
-[data-theme="dark"] .ynb.sel-n    { background: #e04040 !important; border-color: #7a1313 !important; color: #ffffff !important; }
-[data-theme="dark"] .ynb.sel-na   {
-  background-color: #5a5a55 !important;
-  border-color: #2e2e2a !important;
-  color: #ffffff !important;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.35)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text></svg>") !important;
-  background-repeat: repeat !important;
-  background-size: 22px 22px !important;
-}
+
+/* Selected state — bright solid boxes, visible on dark bg */
+[data-theme="dark"] .ynb.sel-y { background: #1ea555 !important; border-color: #0f5a2b !important; color: #ffffff !important; }
+[data-theme="dark"] .ynb.sel-n { background: #e04040 !important; border-color: #7a1313 !important; color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-y > *,
-[data-theme="dark"] .ynb.sel-n > *,
-[data-theme="dark"] .ynb.sel-na > * { color: #ffffff !important; }
+[data-theme="dark"] .ynb.sel-n > * { color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-y::after,
-[data-theme="dark"] .ynb.sel-n::after,
-[data-theme="dark"] .ynb.sel-na::after { color: #ffffff; opacity: .95; }
+[data-theme="dark"] .ynb.sel-n::after { color: #ffffff; opacity: .95; }
 
 /* Analyst selects */
 [data-theme="dark"] .analyst-select {

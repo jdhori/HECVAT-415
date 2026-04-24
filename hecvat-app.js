@@ -423,18 +423,18 @@ var HECVAT_SEC = (function () {
       L.appendChild(g);
     }
 
-    /* Sync checkbox — controls whether this instance mirrors R[qid] */
+    /* Sync checkbox — controls whether this instance mirrors R[qid].
+       Label is unique per-question so each form field has a distinct
+       accessible name (e.g. "Sync GNRL-01 with other sections"). */
     var syncWrap = mk('div', 'sync-wrap');
     var syncCb = document.createElement('input');
     syncCb.type = 'checkbox';
     syncCb.className = 'sync-cb';
     syncCb.id = 'sync-' + secId + '-' + q.id;
     syncCb.checked = linked;
-    attr(syncCb, 'aria-label',
-      'Use this answer for the same question in other sections');
+    attr(syncCb, 'aria-label', 'Sync ' + q.id + ' with other sections');
     var syncLbl = mk('label', 'sync-lbl'); syncLbl.htmlFor = syncCb.id;
-    syncLbl.appendChild(txt(
-      'Sync this answer with the same question in other sections'));
+    syncLbl.appendChild(txt('Sync ' + q.id + ' with other sections'));
     syncWrap.appendChild(syncCb); syncWrap.appendChild(syncLbl);
     L.appendChild(syncWrap);
     row.appendChild(L);
@@ -530,25 +530,24 @@ var HECVAT_SEC = (function () {
       updateUI = function (v) { inp.value = v || ''; };
 
     } else {
-      /* Yes / No / N/A */
+      /* Yes / No */
       var wrap = mk('div', 'yng-wrap');
       var grp = mk('div', 'yng'); attr(grp, 'role', 'group');
       attr(grp, 'aria-labelledby', 'qt-' + secId + '-' + q.id);
 
       var btnMap = {};
-      ['Yes', 'No', 'N/A'].forEach(function (v) {
-        var vk = v === 'N/A' ? 'na' : v.toLowerCase();
-        var btn = mk('button', 'ynb');
+      ['Yes', 'No'].forEach(function (v) {
+        var vk = v.toLowerCase();
+        var btn = mk('button', 'ynb ynb-' + vk);
         btn.type = 'button';
         btn.id = 'yn-' + vk + '-' + secId + '-' + q.id;
         attr(btn, 'aria-pressed', 'false');
         attr(btn, 'data-qid', q.id);
         attr(btn, 'data-val', v);
         attr(btn, 'data-sec', secId);
-        attr(btn, 'aria-label',
-          (v === 'Yes' ? 'Yes \u2014 ' : v === 'No' ? 'No \u2014 ' : 'Not Applicable \u2014 ') + q.q);
+        attr(btn, 'aria-label', (v === 'Yes' ? 'Yes \u2014 ' : 'No \u2014 ') + q.q);
         var icon = mk('span'); attr(icon, 'aria-hidden', 'true');
-        icon.appendChild(txt(v === 'Yes' ? '\u2713 Yes' : v === 'No' ? '\u2717 No' : '\u2014 N/A'));
+        icon.appendChild(txt(v === 'Yes' ? '\u2713 Yes' : '\u2717 No'));
         btn.appendChild(icon);
         btn.addEventListener('click', function () {
           var cur = getVal();
@@ -578,18 +577,16 @@ var HECVAT_SEC = (function () {
       function applyYesNoDisplay(val) {
         Object.keys(btnMap).forEach(function (kk) {
           var b = btnMap[kk];
-          b.classList.remove('sel-y', 'sel-n', 'sel-na');
+          b.classList.remove('sel-y', 'sel-n');
           attr(b, 'aria-pressed', 'false');
         });
         if (val === 'Yes') { btnMap['Yes'].classList.add('sel-y'); attr(btnMap['Yes'], 'aria-pressed', 'true'); }
         else if (val === 'No') { btnMap['No'].classList.add('sel-n'); attr(btnMap['No'], 'aria-pressed', 'true'); }
-        else if (val === 'N/A') { btnMap['N/A'].classList.add('sel-na'); attr(btnMap['N/A'], 'aria-pressed', 'true'); }
 
         var scorable = (q.comp === 'Yes' || q.comp === 'No') &&
                        q.loc !== 'Not Scored' && q.score !== 'NA';
         ci.className = 'cind'; ci.textContent = '';
         if (!scorable || !val) { /* leave hidden */ }
-        else if (val === 'N/A') { ci.className = 'cind on neu'; ci.textContent = '\u2014 N/A \u2014 Not applicable'; }
         else if (val === q.comp) { ci.className = 'cind on ok'; ci.textContent = '\u2713 Compliant response'; }
         else { ci.className = 'cind on bad'; ci.textContent = '\u2717 Non-compliant response'; }
       }
@@ -897,10 +894,10 @@ var HECVAT_SEC = (function () {
       rlbl.appendChild(txt('Response'));
       wrap.appendChild(rlbl);
 
-      /* Always offer Yes, No, AND N/A for all yesno questions */
-      ['Yes', 'No', 'N/A'].forEach(function (v) {
-        var vk  = v === 'N/A' ? 'na' : v.toLowerCase();
-        var btn = mk('button', 'ynb');
+      /* Yes / No — only binary answers are offered */
+      ['Yes', 'No'].forEach(function (v) {
+        var vk  = v.toLowerCase();
+        var btn = mk('button', 'ynb ynb-' + vk);
         btn.type = 'button';
         btn.id   = 'yn-' + vk + '-' + q.id;
         attr(btn, 'aria-pressed', 'false');
@@ -908,14 +905,11 @@ var HECVAT_SEC = (function () {
         attr(btn, 'data-val', v);
 
         /* Full unique accessible label = action + question text */
-        attr(btn, 'aria-label',
-          (v === 'Yes'  ? 'Yes — ' :
-           v === 'No'   ? 'No — '  :
-                          'Not Applicable — ') + q.q);
+        attr(btn, 'aria-label', (v === 'Yes' ? 'Yes \u2014 ' : 'No \u2014 ') + q.q);
 
         /* Visible text (icon only — question context comes via tooltip on focus) */
         var icon = mk('span'); attr(icon, 'aria-hidden', 'true');
-        icon.appendChild(txt(v === 'Yes' ? '\u2713 Yes' : v === 'No' ? '\u2717 No' : '\u2014 N/A'));
+        icon.appendChild(txt(v === 'Yes' ? '\u2713 Yes' : '\u2717 No'));
         btn.appendChild(icon);
 
         grp.appendChild(btn);
