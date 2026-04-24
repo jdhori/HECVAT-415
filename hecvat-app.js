@@ -2259,7 +2259,8 @@ var HECVAT_SEC = (function () {
     var tbl = mk('table','eval-sc-table'); attr(tbl,'role','table'); attr(tbl,'aria-label',ariaLabel);
     var thead = mk('thead'); var hrow = mk('tr');
     ['Report Section','Max Score','Score','Score %'].forEach(function(h){
-      var th=mk('th'); th.appendChild(txt(h)); hrow.appendChild(th);
+      var th = mk('th'); attr(th, 'scope', 'col');
+      th.appendChild(txt(h)); hrow.appendChild(th);
     });
     thead.appendChild(hrow); tbl.appendChild(thead);
     var tbody = mk('tbody'); tbody.id='esc-body-'+id; tbl.appendChild(tbody);
@@ -2273,7 +2274,9 @@ var HECVAT_SEC = (function () {
   function scorecardRow(label, sc) {
     var tr = mk('tr');
     var pct = sc.pct, bc = pct===null?'':pct>=80?'g':pct>=60?'o':'r';
-    var td1=mk('td','eval-sc-cat'); td1.appendChild(txt(label)); tr.appendChild(td1);
+    /* Row label — use <th scope="row"> so AT announces it as the row header */
+    var th1 = mk('th','eval-sc-cat'); attr(th1, 'scope', 'row');
+    th1.appendChild(txt(label)); tr.appendChild(th1);
     var td2=mk('td','eval-sc-pts'); td2.appendChild(txt(sc.pot+' pts')); tr.appendChild(td2);
     var td3=mk('td','eval-sc-pts'); td3.appendChild(txt(sc.earned+' pts')); tr.appendChild(td3);
     var td4=mk('td','eval-sc-pct '+bc); td4.appendChild(txt(pct!==null?pct+'%':'N/A')); tr.appendChild(td4);
@@ -2286,10 +2289,12 @@ var HECVAT_SEC = (function () {
     frow.replaceChildren();
     var pct = pot>0?Math.round(earned/pot*100):null;
     var bc  = pct===null?'':pct>=80?'g':pct>=60?'o':'r';
-    var td1=mk('td','eval-sc-cat'); td1.colSpan=2; td1.appendChild(txt('Overall Score'));
+    /* Overall-score row spans the first two cols; still mark as a <th row> */
+    var th1 = mk('th','eval-sc-cat'); attr(th1, 'scope', 'row');
+    th1.colSpan=2; th1.appendChild(txt('Overall Score'));
     var td2=mk('td','eval-sc-pts'); td2.appendChild(txt(earned+' / '+pot+' pts'));
     var td3=mk('td','eval-sc-pct '+bc); td3.appendChild(txt(pct!==null?pct+'%':'N/A'));
-    frow.appendChild(td1); frow.appendChild(td2); frow.appendChild(td3);
+    frow.appendChild(th1); frow.appendChild(td2); frow.appendChild(td3);
   }
 
   /* ================================================================
@@ -2358,7 +2363,8 @@ var HECVAT_SEC = (function () {
     var nnSc = scoreQs(nnQs);
     var nnCnt = nnQs.length;
     var nnRow = mk('tr');
-    var nn1=mk('td','eval-sc-cat'); nn1.appendChild(txt('Non-Negotiable ('+(nnCnt)+' flagged)')); nnRow.appendChild(nn1);
+    var nnTh = mk('th','eval-sc-cat'); attr(nnTh, 'scope', 'row');
+    nnTh.appendChild(txt('Non-Negotiable ('+(nnCnt)+' flagged)')); nnRow.appendChild(nnTh);
     var nn2=mk('td','eval-sc-pts'); nn2.appendChild(txt(nnSc.pot+' pts')); nnRow.appendChild(nn2);
     var nn3=mk('td','eval-sc-pts'); nn3.appendChild(txt(nnSc.earned+' pts')); nnRow.appendChild(nn3);
     var nnPct=nnSc.pct; var nnBc=nnPct===null?'':nnPct>=80?'g':nnPct>=60?'o':'r';
@@ -2369,7 +2375,8 @@ var HECVAT_SEC = (function () {
     var critQs = HECVAT_QUESTIONS.filter(function(q){ return q.imp==='Critical Importance' && q.loc!=='Not Scored'; });
     var critSc = scoreQs(critQs);
     var critRow = mk('tr');
-    var c1=mk('td','eval-sc-cat'); c1.appendChild(txt('Critical Importance / Lite Score ('+critQs.length+' questions)')); critRow.appendChild(c1);
+    var critTh = mk('th','eval-sc-cat'); attr(critTh, 'scope', 'row');
+    critTh.appendChild(txt('Critical Importance / Lite Score ('+critQs.length+' questions)')); critRow.appendChild(critTh);
     var c2=mk('td','eval-sc-pts'); c2.appendChild(txt(critSc.pot+' pts')); critRow.appendChild(c2);
     var c3=mk('td','eval-sc-pts'); c3.appendChild(txt(critSc.earned+' pts')); critRow.appendChild(c3);
     var cPct=critSc.pct; var cBc=cPct===null?'':cPct>=80?'g':cPct>=60?'o':'r';
@@ -2403,7 +2410,7 @@ var HECVAT_SEC = (function () {
 
     /* Critical Importance column */
     var critCol = mk('div');
-    var critHead = mk('div','cat-hdr'); critHead.appendChild(txt('Critical Importance Questions'));
+    var critHead = mk('h3','cat-hdr'); critHead.appendChild(txt('Critical Importance Questions'));
     var critCt = mk('span','cat-ct'); critCt.id='hr-crit-ct'; critCt.textContent='90'; critHead.appendChild(critCt);
     critCol.appendChild(critHead);
 
@@ -2429,7 +2436,7 @@ var HECVAT_SEC = (function () {
 
     /* Non-Negotiable column */
     var nnCol = mk('div');
-    var nnHead = mk('div','cat-hdr'); nnHead.appendChild(txt('Non-Negotiable Questions'));
+    var nnHead = mk('h3','cat-hdr'); nnHead.appendChild(txt('Non-Negotiable Questions'));
     var nnCt = mk('span','cat-ct'); nnCt.id='hr-nn-ct'; nnCt.textContent='0'; nnHead.appendChild(nnCt);
     nnCol.appendChild(nnHead);
 

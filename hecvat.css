@@ -435,7 +435,9 @@ main { min-width: 0; }
 .cat-body { }
 .cat-body.cat-collapsed { display: none; }
 
-/* Legacy alias — some elements still use .cat-hdr for the badge row */
+/* Section-list headings in the High-Risk panel (e.g. "Critical
+   Importance Questions", "Non-Negotiable Questions"). Rendered as <h3>
+   for correct document outline, but styled flat. */
 .cat-hdr {
   background: var(--g1);
   padding: .5rem 1.5rem;
@@ -449,6 +451,9 @@ main { min-width: 0; }
   display: flex;
   align-items: center;
   gap: .35rem;
+  /* Zero out UA heading margins so the h3 fits the flat badge-row look */
+  margin: 0;
+  line-height: 1.3;
 }
 .cat-ct { font-size: .6rem; background: var(--navy); color: #fff; padding: .07rem .32rem; border-radius: 7px; }
 
@@ -835,7 +840,8 @@ textarea { resize: vertical; min-height: 70px; }
   border-collapse: collapse;
   font-size: .78rem;
 }
-.eval-sc-table th {
+/* Column headers (thead) — uppercase eyebrow style */
+.eval-sc-table thead th {
   background: var(--g1);
   padding: .4rem .75rem;
   text-align: left;
@@ -846,14 +852,34 @@ textarea { resize: vertical; min-height: 70px; }
   color: var(--navy);
   border-bottom: 1px solid var(--g2);
 }
+/* Row headers (tbody/tfoot th scope="row") — read like a row label, not
+   like a column header. Inherit table-body look: no uppercase, normal weight
+   hierarchy, readable colour in both themes. */
+.eval-sc-table tbody th,
+.eval-sc-table tfoot th {
+  padding: .45rem .75rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: .78rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  background: transparent;
+  border-bottom: 1px solid var(--g1);
+  vertical-align: middle;
+}
 .eval-sc-table td {
   padding: .45rem .75rem;
   border-bottom: 1px solid var(--g1);
   vertical-align: middle;
 }
-.eval-sc-table tr:last-child td { border-bottom: none; }
-.eval-sc-table tr:hover td { background: var(--g1); }
-.eval-sc-cat { font-weight: 600; color: var(--navy); }
+.eval-sc-table tr:last-child td,
+.eval-sc-table tr:last-child th { border-bottom: none; }
+.eval-sc-table tr:hover td,
+.eval-sc-table tbody tr:hover th { background: var(--g1); }
+/* .eval-sc-cat is now carried on the row <th>; inherit the th colour so
+   it stays readable in both themes. Keep weight override. */
+.eval-sc-cat { font-weight: 600; }
 .eval-sc-bar-cell { width: 120px; }
 .eval-sc-bar-wrap { height: 6px; background: var(--g2); border-radius: 3px; overflow: hidden; }
 .eval-sc-bar { height: 100%; border-radius: 3px; background: var(--navy); }
@@ -1401,9 +1427,24 @@ h2.snav-hd-eval { background: #1e3a5f; }
 /* Eval scorecard */
 [data-theme="dark"] .eval-scorecard  { background: var(--white); border-color: var(--g2); }
 [data-theme="dark"] .eval-scorecard-title { background: #162d4a; }
-[data-theme="dark"] .eval-sc-table th    { background: var(--g1); color: var(--text); border-bottom-color: var(--g2); }
+/* Column headers in dark mode: slightly lighter band, readable text */
+[data-theme="dark"] .eval-sc-table thead th { background: var(--g1); color: var(--text); border-bottom-color: var(--g2); }
+/* Row-header cells (the "Report Section" column) in dark mode — plain
+   readable text, not the dark-navy used in light mode. */
+[data-theme="dark"] .eval-sc-table tbody th,
+[data-theme="dark"] .eval-sc-table tfoot th { color: var(--text); background: transparent; border-bottom-color: var(--g1); }
 [data-theme="dark"] .eval-sc-table td   { border-bottom-color: var(--g1); }
-[data-theme="dark"] .eval-sc-table tr:hover td { background: var(--g1); }
+[data-theme="dark"] .eval-sc-table tr:hover td,
+[data-theme="dark"] .eval-sc-table tbody tr:hover th { background: var(--g1); }
+
+/* "Critical Importance Questions" / "Non-Negotiable Questions" headings
+   and HR list qid badges all used var(--navy) which stays dark blue in
+   dark mode. Use body text (near-white) so they're clearly readable,
+   with a gold accent on the count badge for visual hierarchy. */
+[data-theme="dark"] .cat-hdr     { color: var(--text); background: var(--g2); border-color: var(--g3); }
+[data-theme="dark"] .cat-ct      { background: var(--gold2); color: #1a1a18; }
+[data-theme="dark"] .hr-qid      { color: var(--text); }
+[data-theme="dark"] .hr-qid-red  { color: #fca5a5; }  /* light-red, readable on dark */
 [data-theme="dark"] .eval-overall-row td { background: var(--gold-pale); }
 
 /* Analyst row */
