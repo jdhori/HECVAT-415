@@ -638,23 +638,17 @@ textarea { resize: vertical; min-height: 70px; }
   /* Question label is in aria-label — visually we show only icon+word */
 }
 
-/* Yes button — always green tinted, deeper saturation on hover/selected.
-   Unselected uses a pale green fill with a green border + dark green text
-   so the affirmative meaning of the button is visible at rest. */
-.ynb-yes {
-  background: #dcfce7;
-  border-color: #15803d;
-  color: #0b5a2a;
-}
-.ynb-yes:hover { background: #bbf7d0; }
-
-/* No button — always red tinted. */
+/* Unselected Yes and No share the same yellow "pending / awaiting answer"
+   look so the user's eye is drawn to them but no implied commitment
+   is shown until they pick one.  Selection switches to green / red. */
+.ynb-yes,
 .ynb-no {
-  background: #fee2e2;
-  border-color: #b91c1c;
-  color: #7f1414;
+  background: #fef3c7;   /* amber-100 — warm yellow fill */
+  border-color: #d97706; /* amber-600 — strong border */
+  color: #78350f;        /* amber-900 — readable dark amber text */
 }
-.ynb-no:hover { background: #fecaca; }
+.ynb-yes:hover,
+.ynb-no:hover { background: #fde68a; }  /* amber-200 */
 
 /* Selected state — solid saturated box, bold white text, heavy ring.
    !important ensures no theme or override specificity dulls the state. */
@@ -1217,11 +1211,11 @@ h2.snav-hd-eval { background: #1e3a5f; }
 [data-theme="dark"] .qmeta        { color: var(--g4); }
 [data-theme="dark"] .qtext        { color: var(--text); }
 
-/* Yes / No buttons — dark theme */
-[data-theme="dark"] .ynb-yes         { background: #0f3a22; border-color: #1ea555; color: #86efac; }
-[data-theme="dark"] .ynb-yes:hover   { background: #14532d; }
-[data-theme="dark"] .ynb-no          { background: #3a1010; border-color: #e04040; color: #fca5a5; }
-[data-theme="dark"] .ynb-no:hover    { background: #4a1414; }
+/* Yes / No unselected buttons — dark theme keeps the amber "pending" look */
+[data-theme="dark"] .ynb-yes,
+[data-theme="dark"] .ynb-no          { background: #3a2a08; border-color: #d97706; color: #fbbf24; }
+[data-theme="dark"] .ynb-yes:hover,
+[data-theme="dark"] .ynb-no:hover    { background: #4a360a; }
 
 /* Dark-mode compliance pop-ups: brighter fills, matching the button
    selected state so the association holds across themes. */
