@@ -696,16 +696,17 @@ var HECVAT_SEC = (function () {
       if (fi && fi.value !== (val || '')) fi.value = val || '';
       return;
     }
-    /* Yes/No/N/A — update button classes + aria-pressed + guidance + compliance */
-    ['y', 'n', 'na'].forEach(function (vk) {
+    /* Yes/No/N/A — update button classes + aria-pressed + guidance + compliance.
+       Element IDs use full-word suffixes; selection classes are single-letter. */
+    ['yes', 'no', 'na'].forEach(function (vk) {
       var btn = document.getElementById('yn-' + vk + '-' + qid);
       if (!btn) return;
       btn.classList.remove('sel-y', 'sel-n', 'sel-na');
       attr(btn, 'aria-pressed', 'false');
     });
-    if (val === 'Yes')     { var b1 = document.getElementById('yn-y-'  + qid); if (b1) { b1.classList.add('sel-y');  attr(b1, 'aria-pressed', 'true'); } }
-    else if (val === 'No') { var b2 = document.getElementById('yn-n-'  + qid); if (b2) { b2.classList.add('sel-n');  attr(b2, 'aria-pressed', 'true'); } }
-    else if (val === 'N/A'){ var b3 = document.getElementById('yn-na-' + qid); if (b3) { b3.classList.add('sel-na'); attr(b3, 'aria-pressed', 'true'); } }
+    if (val === 'Yes')     { var b1 = document.getElementById('yn-yes-' + qid); if (b1) { b1.classList.add('sel-y');  attr(b1, 'aria-pressed', 'true'); } }
+    else if (val === 'No') { var b2 = document.getElementById('yn-no-'  + qid); if (b2) { b2.classList.add('sel-n');  attr(b2, 'aria-pressed', 'true'); } }
+    else if (val === 'N/A'){ var b3 = document.getElementById('yn-na-'  + qid); if (b3) { b3.classList.add('sel-na'); attr(b3, 'aria-pressed', 'true'); } }
 
     var yg = document.getElementById('yg-' + qid);
     var ng = document.getElementById('ng-' + qid);
@@ -1163,15 +1164,21 @@ var HECVAT_SEC = (function () {
     var q = HECVAT_QUESTIONS.find(function (x) { return x.id === qid; });
     if (!q) return;
 
-    /* Update button states */
-    var vk = val === 'N/A' ? 'na' : val.toLowerCase();
-    ['y', 'n', 'na'].forEach(function (v) {
-      var btn = document.getElementById('yn-' + v + '-' + qid);
-      if (!btn) return;
-      attr(btn, 'aria-pressed', v === vk ? 'true' : 'false');
-      btn.classList.remove('sel-y', 'sel-n', 'sel-na');
-      if (v === vk) btn.classList.add('sel-' + v);
+    /* Update button states.  Button element IDs use the full word
+       ('yn-yes-*', 'yn-no-*', 'yn-na-*') but the visual selected-state
+       classes use single letters ('sel-y', 'sel-n', 'sel-na') — map
+       between the two explicitly. */
+    var btnY  = document.getElementById('yn-yes-' + qid);
+    var btnN  = document.getElementById('yn-no-'  + qid);
+    var btnNA = document.getElementById('yn-na-'  + qid);
+    [btnY, btnN, btnNA].forEach(function (b) {
+      if (!b) return;
+      attr(b, 'aria-pressed', 'false');
+      b.classList.remove('sel-y', 'sel-n', 'sel-na');
     });
+    if (val === 'Yes' && btnY)  { btnY.classList.add('sel-y');   attr(btnY,  'aria-pressed', 'true'); }
+    else if (val === 'No' && btnN)  { btnN.classList.add('sel-n');   attr(btnN,  'aria-pressed', 'true'); }
+    else if (val === 'N/A' && btnNA){ btnNA.classList.add('sel-na'); attr(btnNA, 'aria-pressed', 'true'); }
 
     /* Conditional guidance — show/hide with aria-hidden for screen readers */
     var yg = document.getElementById('yg-' + qid);
@@ -1221,8 +1228,8 @@ var HECVAT_SEC = (function () {
 
     var q = HECVAT_QUESTIONS.find(function(x){ return x.id === qid; });
 
-    /* Reset all three buttons */
-    ['y','n','na'].forEach(function(v) {
+    /* Reset all Yes/No/NA buttons (IDs use full-word suffixes) */
+    ['yes','no','na'].forEach(function(v) {
       var btn = document.getElementById('yn-' + v + '-' + qid);
       if (!btn) return;
       attr(btn, 'aria-pressed', 'false');
