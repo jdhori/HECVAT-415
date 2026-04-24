@@ -65,8 +65,13 @@ Each scored question carries a point value based on its importance level:
 | Standard   | 10 pts |
 | Minor      | 5 pts  |
 
-Answering **N/A** excludes that question from your total — it reduces both
-earned and possible points proportionally, so it doesn't penalise your score.
+Legacy saved responses that contain an `"N/A"` value (exported before the
+N/A button was removed) are still read correctly: on load, N/A values are
+treated the way they always were — the question is excluded from the total
+by reducing both earned and possible points proportionally, so they don't
+penalise your score. The UI itself now offers only Yes and No; leaving a
+question **unanswered** is the right way to signal "not applicable" in new
+assessments.
 
 The **score banner** at the top of the page updates in real time, showing:
 - Points earned / points possible
@@ -78,15 +83,33 @@ The **score banner** at the top of the page updates in real time, showing:
 
 ## Answering Questions
 
-### Yes / No / N/A buttons
+### Yes / No buttons
 
-Most questions use a three-button toggle. Click the appropriate answer. After
-you answer, a **compliance indicator** appears below the buttons showing
-whether your answer matches the expected compliant response for that question.
+Most questions use a two-button toggle. Both buttons start in an **amber
+"pending"** state — amber fill, amber border, dark-amber text — so they read
+as "awaiting your answer" without implying a preferred choice. Click one to
+commit:
 
-- **✓ Compliant response** — your answer matches the expected response
-- **✗ Non-compliant response** — your answer differs from expected
-- **— N/A — Not applicable** — excluded from scoring
+- Selecting **Yes** swaps the button to a solid **green** fill with white text
+  and a corner ✓ pip.
+- Selecting **No** swaps the button to a solid **red** fill with white text
+  and a corner ✓ pip.
+- Clicking the already-selected button again clears the answer and returns
+  both buttons to the amber pending state.
+
+After you answer, a **compliance indicator** appears below the buttons showing
+whether your answer matches the expected compliant response. The indicator
+uses the **same green or red** as the selected button so the visual thread
+from "what I chose" to "what that means" is continuous:
+
+- **✓ Compliant response** — solid green banner; your answer matches the
+  expected compliant response for that question
+- **✗ Non-compliant response** — solid red banner; your answer differs from
+  the expected compliant response
+
+Routing/informational questions (REQU-\*, GNRL-\*, PDOC-01, PDOC-02, etc.)
+have no "correct" answer and therefore do not display a compliance banner —
+they shape section gating and metadata only.
 
 When you tab into a button group using the keyboard, a **tooltip** appears
 above the buttons showing the full question text — useful for keyboard-only
@@ -112,16 +135,31 @@ included in all exports.
 
 ---
 
-## Cross-Referenced Questions
+## Multi-Section Questions (GNRL, REQU)
 
-132 of the 332 questions appear in more than one section (for example, general
-company information applies to every section; HIPAA questions appear in both
-Case-Specific and Privacy).
+A small number of questions appear in more than one section — general company
+information (`GNRL-01` through `GNRL-08`) surfaces in every section, and the
+routing questions (`REQU-01` through `REQU-07`) surface in the sections they
+gate.
 
-**Each question is only answered once** — in the first section where it
-appears. In later sections, you'll see a compact reference row showing your
-current answer and a link to jump back to where the question is answered. When
-you update an answer, all cross-references update immediately.
+**Each instance is independently answerable.** Every section gets its own
+input field plus a **"Sync *\<question-id\>* with other sections"** checkbox
+(checked by default, with a unique per-question accessible label such as
+`"Sync GNRL-01 with other sections"`).
+
+- **Checkbox checked (linked, default)** — the instance shares the master
+  answer with every other instance of the same question. Typing or clicking
+  in one place propagates to all linked copies in real time.
+- **Checkbox unchecked (independent)** — the instance stores its own
+  per-section override. Changes there do not affect other sections, and
+  changes elsewhere do not affect this instance. The row gets an amber left
+  border so you can see at a glance which instances have drifted.
+- **Re-checking** adopts the current master value and discards the local
+  override.
+
+Scoring always uses the primary-section answer for each question, so
+per-section overrides are a documentation convenience — they don't
+double-count.
 
 ---
 
@@ -145,6 +183,69 @@ When a section is not required:
 
 You can still navigate to and answer questions in a gated section if they are
 relevant — the gating is advisory, not a lock.
+
+---
+
+## Analyst Evaluations
+
+Below the **Vendor Response** sidebar group is a second nav group,
+**Analyst Evaluations**, with three tabs for reviewers working through a
+completed submission:
+
+| Tab | Purpose |
+|---|---|
+| **Institution Evaluation** | Full analyst review — every scored category with vendor responses, importance overrides, compliance overrides, analyst notes, and a Non-Negotiable flag. |
+| **High-Risk Evaluation** | Condensed view: the 90 Critical questions plus any the analyst has flagged as Non-Negotiable. Read-only summary that reflects overrides made elsewhere. |
+| **Privacy Analyst Evaluation** | The ten privacy categories (PRGN, PCOM, PDOC, PTHP, PCHG, PDAT, PRPO, INTL, DRPV, DPAI) with the same override controls as Institution Evaluation. |
+
+### Statistical Methods reference
+
+Inside **Institution Evaluation** is a collapsible **📊 Statistical Methods —
+Comparing Groups & Means** panel. It documents the statistics this tool
+exposes (Confidence Intervals, Standard Error of the Mean, visual
+representations, and significance testing) so analysts interpreting the
+plots below have a shared vocabulary.
+
+### Compliance Plots
+
+Immediately below the Statistical Methods panel is a collapsible
+**📈 Compliance Plots — By Category (95% CI)** panel containing three
+complementary charts rendered as native SVG (no external libraries, no
+network requests, fully inside the tool's CSP):
+
+1. **Compliance proportion by category with 95% confidence intervals.** One
+   bar per category; bar height is the Yes/No compliance rate; whiskers are
+   the **Wilson-score 95% CI**. Non-overlapping intervals imply the
+   categories differ significantly at p < 0.05.
+2. **Answer composition by category.** Stacked bars showing counts of
+   Compliant / Non-Compliant / N/A / Unanswered per category so the sample
+   size behind each rate is immediately visible.
+3. **Pairwise category comparisons (two-proportion z-test).** Heat-map grid
+   of every category pair, colored by **Bonferroni-adjusted** significance
+   (`ns`, `*` p<0.05, `**` p<0.01, `***` p<0.001). Hover a cell for exact
+   z-statistic, raw p-value, and adjusted p-value.
+
+Every plot is accessible:
+
+- Each chart is a `<figure>` with a `<figcaption>` and the SVG's first two
+  children are `<title>` + `<desc>` that narrate every data point in prose
+  (e.g. *"APPL: 67% compliant, 95% CI 45% to 84%, n equals 12. ..."*). That
+  text is what screen readers actually announce for `role="img"`.
+- Every individual bar, stack segment, and heatmap cell carries its own
+  nested `<title>` so keyboard/screen-reader users navigating by element hear
+  the exact numbers for that element.
+- Each figure has a **"View data as table"** toggle that reveals a semantic
+  `<table>` with `<caption>`, row/column scope, the Wilson CI, the Standard
+  Error of the Mean, and the z-test outputs — the definitive accessible
+  alternative when the SVG summary isn't enough.
+- Each figure has a **zoom toolbar** (**−** / live **%** readout with
+  `aria-live="polite"` / **+** / **Reset**) that scales the SVG from 50% to
+  300% in 25% steps while keeping it crisp. The SVG host itself is
+  keyboard-focusable and scrolls when zoomed so you can pan.
+
+Plots render lazily — they only build when you open the panel — and
+auto-refresh whenever the institution scorecard updates, so they stay in
+sync with vendor answers and analyst overrides.
 
 ---
 
@@ -252,21 +353,46 @@ This form was built to meet WCAG 2.1 AA. Key features:
 - **Skip to main content** link at the top of every page
 - Every interactive element has a unique, descriptive `aria-label` that
   includes the associated question text — screen readers announce the full
-  context of each button
-- Yes/No/N/A button groups use `role="group"` with `aria-labelledby` pointing
-  to the question text element
+  context of each button. Multi-section sync checkboxes carry the question
+  ID so every form field has a distinct accessible name (e.g. `"Sync GNRL-01
+  with other sections"`)
+- Yes / No button groups use `role="group"` with `aria-labelledby` pointing
+  to the question text element; selected state is announced via
+  `aria-pressed`
 - A **visual tooltip** appears above button groups when they receive keyboard
   focus, showing the question text for sighted keyboard users
 - Compliance status indicators use `aria-live="polite"` for screen reader
   announcement
 - The running score banner uses `role="status"` and `aria-live="polite"`
-- All cross-reference "Not yet answered" indicators use `aria-live="polite"`
 - Section panels use `role="region"` with `aria-labelledby`
 - Sidebar navigation supports **Arrow Up / Arrow Down** key navigation between
   sections
 - Critical questions are marked with a ★ badge and a distinct left border
-- Colour is never the sole means of conveying information — compliance
-  indicators also use text labels (✓ / ✗ / —)
+- Colour is never the sole means of conveying information — Yes/No buttons
+  also carry an icon (✓ / ✗) and a corner pip in the selected state; the
+  pairwise significance heatmap uses `ns / * / ** / ***` text labels on top
+  of its color coding
+
+### Compliance plot accessibility
+
+The three SVG charts on the Institution Evaluation tab are fully accessible:
+
+- Each chart is a `<figure role="figure">` with a `<figcaption>` linked via
+  `aria-labelledby`
+- Each SVG has `<title>` and `<desc>` **first children**, providing the
+  `role="img"` accessible name/description with a prose narration of every
+  data point
+- Every `<rect>` (bar, stack segment, heatmap cell) has its own nested
+  `<title>` with the exact numbers for that element
+- Each figure has a **"View data as table"** toggle revealing a semantic
+  `<table>` with `<caption>`, `<th scope="col">`, `<th scope="row">`, and
+  the same data in tabular form — the reliable alternative when SVG
+  narration isn't enough
+- Each figure has a **keyboard-accessible zoom toolbar** (− / % / + /
+  Reset) that scales the SVG from 50% to 300%; the zoom percentage has
+  `aria-live="polite"` so changes are announced
+- SVG hosts are `tabindex="0"` with a visible focus ring, so keyboard users
+  can tab to a chart to hear its summary
 
 ---
 
