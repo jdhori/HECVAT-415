@@ -198,17 +198,9 @@ completed submission:
 | **High-Risk Evaluation** | Condensed view: the 90 Critical questions plus any the analyst has flagged as Non-Negotiable. Read-only summary that reflects overrides made elsewhere. |
 | **Privacy Analyst Evaluation** | The ten privacy categories (PRGN, PCOM, PDOC, PTHP, PCHG, PDAT, PRPO, INTL, DRPV, DPAI) with the same override controls as Institution Evaluation. |
 
-### Statistical Methods reference
-
-Inside **Institution Evaluation** is a collapsible **📊 Statistical Methods —
-Comparing Groups & Means** panel. It documents the statistics this tool
-exposes (Confidence Intervals, Standard Error of the Mean, visual
-representations, and significance testing) so analysts interpreting the
-plots below have a shared vocabulary.
-
 ### Compliance Plots
 
-Immediately below the Statistical Methods panel is a collapsible
+Inside **Institution Evaluation** is a collapsible
 **📈 Compliance Plots — By Category (95% CI)** panel containing three
 complementary charts rendered as native SVG (no external libraries, no
 network requests, fully inside the tool's CSP):
@@ -219,11 +211,16 @@ network requests, fully inside the tool's CSP):
    categories differ significantly at p < 0.05.
 2. **Answer composition by category.** Stacked bars showing counts of
    Compliant / Non-Compliant / N/A / Unanswered per category so the sample
-   size behind each rate is immediately visible.
+   size behind each rate is immediately visible. Each segment uses a
+   distinct **fill pattern** as well as a distinct color (solid green for
+   Compliant, diagonal red stripes for Non-Compliant, amber dots for N/A,
+   grey crosshatch for Unanswered) so the chart stays readable without
+   relying on color alone.
 3. **Pairwise category comparisons (two-proportion z-test).** Heat-map grid
-   of every category pair, colored by **Bonferroni-adjusted** significance
-   (`ns`, `*` p<0.05, `**` p<0.01, `***` p<0.001). Hover a cell for exact
-   z-statistic, raw p-value, and adjusted p-value.
+   of every category pair, colored and patterned by **Bonferroni-adjusted**
+   significance: `ns` solid grey, `*` amber-with-dots (p<0.05), `**`
+   orange-with-stripes (p<0.01), `***` red-with-dense-crosshatch (p<0.001).
+   Hover a cell for exact z-statistic, raw p-value, and adjusted p-value.
 
 Every plot is accessible:
 

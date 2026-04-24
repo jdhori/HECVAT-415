@@ -2476,92 +2476,6 @@ var HECVAT_SEC = (function () {
   }
 
   /* ================================================================
-     STATISTICAL METHODS REFERENCE PANEL
-     Inserted into the Institution Evaluation tab. Documents the primary
-     statistics (CI, SEM) and visual formats analysts should use when
-     comparing groups / differences between means.
-  ================================================================ */
-  function buildStatMethodsRef() {
-    var sec = mk('div', 'cat-sec stat-methods-ref');
-
-    var h3 = mk('h3', 'cat-h3');
-    var togBtn = mk('button', 'cat-tog');
-    togBtn.type = 'button';
-    var togBodyId = 'stat-methods-body';
-    attr(togBtn, 'aria-expanded', 'false');
-    attr(togBtn, 'aria-controls', togBodyId);
-    togBtn.id = 'stat-methods-tog';
-
-    var togLbl = mk('span', 'cat-tog-lbl');
-    togLbl.appendChild(txt('\uD83D\uDCCA Statistical Methods \u2014 Comparing Groups & Means'));
-    togBtn.appendChild(togLbl);
-
-    var togIcon = mk('span', 'cat-tog-icon');
-    attr(togIcon, 'aria-hidden', 'true');
-    togIcon.textContent = '\u25B8';
-    togBtn.appendChild(togIcon);
-
-    h3.appendChild(togBtn);
-    sec.appendChild(h3);
-
-    var body = mk('div', 'cat-body cat-collapsed stat-methods-body');
-    body.id = togBodyId;
-    attr(body, 'role', 'region');
-    attr(body, 'aria-labelledby', 'stat-methods-tog');
-
-    var intro = mk('p', 'stat-intro');
-    intro.appendChild(txt(
-      'Confidence intervals and standard error are the primary statistical ' +
-      'metrics used to visualize differences between group means or answers. ' +
-      'In data visualization, these are typically displayed using bar charts ' +
-      'with error bars, box plots, or scatter plots (such as beeswarm plots) ' +
-      'that include summary statistics like the mean.'
-    ));
-    body.appendChild(intro);
-
-    var items = [
-      { term: 'Confidence Intervals (CI)',
-        body: 'These ranges indicate the likely magnitude of the difference ' +
-              'between groups; if the CI for the difference between two means ' +
-              'does not include zero, the difference is statistically significant.' },
-      { term: 'Standard Error of the Mean (SEM)',
-        body: 'This estimates the precision of the mean and is closely related ' +
-              'to t-tests, often used to show whether a fold change is ' +
-              'significantly different from zero.' },
-      { term: 'Visual Representations',
-        body: 'Box plots are particularly effective for comparing distributions ' +
-              'and identifying extreme values across multiple groups, while bar ' +
-              'charts with error bars provide a simple comparison of means for ' +
-              'categorical data.' },
-      { term: 'Significance Testing',
-        body: 'Statistical tests such as Fisher\u2019s Individual Tests or Tukey\u2019s ' +
-              'method are used to determine which specific pairs of groups have ' +
-              'mean differences that are statistically significant, often ' +
-              'indicated by non-overlapping confidence intervals or grouping ' +
-              'letters in output tables.' },
-    ];
-
-    var dl = mk('dl', 'stat-methods-list');
-    items.forEach(function (it) {
-      var dt = mk('dt', 'stat-term'); dt.appendChild(txt(it.term));
-      var dd = mk('dd', 'stat-def');  dd.appendChild(txt(it.body));
-      dl.appendChild(dt); dl.appendChild(dd);
-    });
-    body.appendChild(dl);
-
-    sec.appendChild(body);
-
-    togBtn.addEventListener('click', function () {
-      var open = togBtn.getAttribute('aria-expanded') === 'true';
-      attr(togBtn, 'aria-expanded', String(!open));
-      body.classList.toggle('cat-collapsed', open);
-      togIcon.textContent = open ? '\u25B8' : '\u25BE';
-    });
-
-    return sec;
-  }
-
-  /* ================================================================
      VISUAL COMPLIANCE PLOTS (native SVG — no external libs, CSP-safe)
 
      Renders two complementary charts on the Institution Evaluation tab:
@@ -2664,22 +2578,15 @@ var HECVAT_SEC = (function () {
       tableLabel: 'Compliance proportion by category, with Wilson 95% confidence intervals and standard error of the mean (SEM)',
     }));
 
-    body.appendChild(buildPlotFigure({
+    /* Chart 2 (stacked composition) gets its own legend attached directly
+       to the figure so the swatches sit under the right chart. */
+    var stackFig = buildPlotFigure({
       id: 'plot-stack',
       figCls: 'plot-wrap',
       caption: 'Answer composition by category',
       tableLabel: 'Answer composition by category, counts of compliant, non-compliant, N/A, and unanswered questions',
-    }));
-
-    body.appendChild(buildPlotFigure({
-      id: 'plot-pairwise',
-      figCls: 'plot-wrap',
-      caption: 'Pairwise category comparisons (two-proportion z-test)',
-      tableLabel: 'Pairwise compliance-rate comparisons between categories using a two-proportion z-test; p-values are Bonferroni-adjusted and rows where the adjusted p-value is below 0.05 are flagged as a significant difference',
-    }));
-
-    /* Legend */
-    var legend = mk('div', 'plot-legend');
+    });
+    var stackLegend = mk('div', 'plot-legend plot-legend-inline');
     [
       ['plot-comp',   'Compliant'],
       ['plot-nc',     'Non-Compliant'],
@@ -2689,9 +2596,17 @@ var HECVAT_SEC = (function () {
       var li = mk('span', 'plot-legend-item');
       var sw = mk('span', 'plot-legend-sw ' + e[0]);
       attr(sw, 'aria-hidden', 'true');
-      li.appendChild(sw); li.appendChild(txt(e[1])); legend.appendChild(li);
+      li.appendChild(sw); li.appendChild(txt(e[1])); stackLegend.appendChild(li);
     });
-    body.appendChild(legend);
+    stackFig.appendChild(stackLegend);
+    body.appendChild(stackFig);
+
+    body.appendChild(buildPlotFigure({
+      id: 'plot-pairwise',
+      figCls: 'plot-wrap',
+      caption: 'Pairwise category comparisons (two-proportion z-test)',
+      tableLabel: 'Pairwise compliance-rate comparisons between categories using a two-proportion z-test; p-values are Bonferroni-adjusted and rows where the adjusted p-value is below 0.05 are flagged as a significant difference',
+    }));
 
     sec.appendChild(body);
 
@@ -2822,6 +2737,91 @@ var HECVAT_SEC = (function () {
     if (se === 0) return { z: 0, p: 1 };
     var z = (p1 - p2) / se;
     return { z: z, p: zToPTwoSided(z) };
+  }
+
+  /* Build a <defs> block containing four distinct fill patterns for the
+     answer-composition stacks. Each pattern combines a solid background
+     colour with a distinctive texture so the segments remain identifiable
+     to users with color-vision deficiencies or in black-and-white prints.
+
+         pat-comp   — solid green (no motif — "positive" reads cleanly)
+         pat-nc     — red with diagonal stripes
+         pat-na     — amber with dots
+         pat-unans  — grey with crosshatch
+  */
+  function buildSegmentPatternDefs() {
+    var defs = svgEl('defs');
+
+    /* Helper: background rect + overlay content */
+    function mkPattern(id, bg, contentFn) {
+      var p = svgEl('pattern', {
+        id: id, x: 0, y: 0, width: 8, height: 8,
+        patternUnits: 'userSpaceOnUse'
+      });
+      p.appendChild(svgEl('rect', { x: 0, y: 0, width: 8, height: 8, fill: bg }));
+      if (contentFn) contentFn(p);
+      defs.appendChild(p);
+    }
+
+    mkPattern('pat-comp',  '#15803d'); // solid
+    mkPattern('pat-nc',    '#b91c1c', function (p) {
+      /* diagonal stripes */
+      p.appendChild(svgEl('path', {
+        d: 'M0,8 L8,0 M-2,2 L2,-2 M6,10 L10,6',
+        stroke: '#5c0b0b', 'stroke-width': '2', fill: 'none'
+      }));
+    });
+    mkPattern('pat-na',    '#b45309', function (p) {
+      /* dots */
+      p.appendChild(svgEl('circle', { cx: 2, cy: 2, r: 1.3, fill: '#fff7ed' }));
+      p.appendChild(svgEl('circle', { cx: 6, cy: 6, r: 1.3, fill: '#fff7ed' }));
+    });
+    mkPattern('pat-unans', '#9a9a90', function (p) {
+      /* crosshatch */
+      p.appendChild(svgEl('path', {
+        d: 'M0,8 L8,0 M0,0 L8,8',
+        stroke: '#efefea', 'stroke-width': '1.5', fill: 'none'
+      }));
+    });
+
+    return defs;
+  }
+
+  /* Patterns for the pairwise-significance heatmap: same visual vocabulary
+     (stripes = non-compliance/significance, dots = borderline, solid =
+     none) so colorblind viewers can still rank severity. */
+  function buildPairwisePatternDefs() {
+    var defs = svgEl('defs');
+    function mkPattern(id, bg, contentFn) {
+      var p = svgEl('pattern', {
+        id: id, x: 0, y: 0, width: 8, height: 8,
+        patternUnits: 'userSpaceOnUse'
+      });
+      p.appendChild(svgEl('rect', { x: 0, y: 0, width: 8, height: 8, fill: bg }));
+      if (contentFn) contentFn(p);
+      defs.appendChild(p);
+    }
+    mkPattern('pat-sig-ns',  '#ececea');  // solid grey — not significant
+    mkPattern('pat-sig1',    '#fde68a', function (p) {
+      /* amber with dots */
+      p.appendChild(svgEl('circle', { cx: 2, cy: 2, r: 1.2, fill: '#78350f' }));
+      p.appendChild(svgEl('circle', { cx: 6, cy: 6, r: 1.2, fill: '#78350f' }));
+    });
+    mkPattern('pat-sig2',    '#fb923c', function (p) {
+      /* orange with diagonal stripes */
+      p.appendChild(svgEl('path', {
+        d: 'M0,8 L8,0 M-2,2 L2,-2 M6,10 L10,6',
+        stroke: '#7c2d12', 'stroke-width': '1.75', fill: 'none'
+      }));
+    });
+    mkPattern('pat-sig3',    '#b91c1c', function (p) {
+      /* red with dense crosshatch */
+      p.appendChild(svgEl('path', {
+        d: 'M0,8 L8,0 M0,0 L8,8 M-2,2 L2,-2 M6,10 L10,6 M-2,6 L2,10 M6,-2 L10,2',
+        stroke: '#3f0707', 'stroke-width': '1.5', fill: 'none'
+      }));
+    });
+    return defs;
   }
 
   /* Write an accessible data table into the hidden <div> for a plot.
@@ -3019,6 +3019,10 @@ var HECVAT_SEC = (function () {
     }).join('. ') + '.';
     svg2.appendChild(d2);
 
+    /* Pattern definitions so each stack segment is distinguishable by shape
+       as well as color (accessibility / color-blindness). */
+    svg2.appendChild(buildSegmentPatternDefs());
+
     var maxN = cats.reduce(function (m, c) { return Math.max(m, stats[c].total); }, 1);
     for (var j = 0; j <= 4; j++) {
       var gy2 = PAD_T2 + chartH2 - (j / 4) * chartH2;
@@ -3035,10 +3039,10 @@ var HECVAT_SEC = (function () {
       var s = stats[cat];
       var cx = PAD_L2 + step2 * idx + step2 / 2;
       var segs = [
-        { key: 'plot-comp',  n: s.comp,  label: 'compliant' },
-        { key: 'plot-nc',    n: s.nc,    label: 'non-compliant' },
-        { key: 'plot-na',    n: s.na,    label: 'N/A' },
-        { key: 'plot-unans', n: s.unans, label: 'unanswered' },
+        { key: 'plot-comp',  pat: 'pat-comp',   n: s.comp,  label: 'compliant' },
+        { key: 'plot-nc',    pat: 'pat-nc',     n: s.nc,    label: 'non-compliant' },
+        { key: 'plot-na',    pat: 'pat-na',     n: s.na,    label: 'N/A' },
+        { key: 'plot-unans', pat: 'pat-unans',  n: s.unans, label: 'unanswered' },
       ];
       var cum = 0;
       segs.forEach(function (seg) {
@@ -3047,7 +3051,9 @@ var HECVAT_SEC = (function () {
         var segY = PAD_T2 + chartH2 - ((cum + seg.n) / maxN) * chartH2;
         var segEl = svgEl('rect', {
           x: cx - barW2 / 2, y: segY, width: barW2, height: segH,
-          'class': 'plot-seg ' + seg.key
+          'class': 'plot-seg ' + seg.key,
+          fill: 'url(#' + seg.pat + ')',
+          stroke: '#1a1a1a', 'stroke-width': '0.5'
         });
         var st = svgEl('title'); st.textContent = cat + ': ' + seg.n + ' ' + seg.label; segEl.appendChild(st);
         svg2.appendChild(segEl);
@@ -3132,6 +3138,7 @@ var HECVAT_SEC = (function () {
       : sigPairs.length + ' of ' + pairs.length + ' pairs differ significantly (adjusted p less than 0.05): ' +
         sigPairs.map(function (p) { return p.a.cat + ' vs ' + p.b.cat + ', adjusted p equals ' + p.padj.toFixed(3); }).join('; ') + '.';
     svg3.appendChild(d3);
+    svg3.appendChild(buildPairwisePatternDefs());
 
     /* Column labels (top) */
     eligible.forEach(function (r, i) {
@@ -3154,6 +3161,7 @@ var HECVAT_SEC = (function () {
         var x = headPx + ci2 * CELL;
         var y = headPx + ri * CELL;
         var cellCls = 'plot-pw-cell plot-pw-cell-empty';
+        var cellPat = null;
         var label = '';
         var pairTitle = '';
         if (ri === ci2) {
@@ -3166,16 +3174,18 @@ var HECVAT_SEC = (function () {
           var B2 = eligible[Math.max(ri, ci2)];
           var thePair = pairs.find(function (p) { return p.a === A2 && p.b === B2; });
           if (thePair) {
-            if (thePair.padj < 0.001) cellCls = 'plot-pw-cell plot-pw-cell-sig3';
-            else if (thePair.padj < 0.01) cellCls = 'plot-pw-cell plot-pw-cell-sig2';
-            else if (thePair.padj < 0.05) cellCls = 'plot-pw-cell plot-pw-cell-sig1';
-            else cellCls = 'plot-pw-cell plot-pw-cell-ns';
+            if (thePair.padj < 0.001)      { cellCls = 'plot-pw-cell plot-pw-cell-sig3'; cellPat = 'pat-sig3'; }
+            else if (thePair.padj < 0.01)  { cellCls = 'plot-pw-cell plot-pw-cell-sig2'; cellPat = 'pat-sig2'; }
+            else if (thePair.padj < 0.05)  { cellCls = 'plot-pw-cell plot-pw-cell-sig1'; cellPat = 'pat-sig1'; }
+            else                           { cellCls = 'plot-pw-cell plot-pw-cell-ns';   cellPat = 'pat-sig-ns'; }
             label = thePair.padj < 0.001 ? '***' : thePair.padj < 0.01 ? '**' : thePair.padj < 0.05 ? '*' : 'ns';
             pairTitle = A2.cat + ' vs ' + B2.cat + ' \u2014 adjusted p=' + thePair.padj.toFixed(3) +
               ' (raw p=' + thePair.p.toFixed(3) + ', z=' + thePair.z.toFixed(2) + ')';
           }
         }
-        var rect3 = svgEl('rect', { x: x + 1, y: y + 1, width: CELL - 2, height: CELL - 2, 'class': cellCls });
+        var rectAttrs = { x: x + 1, y: y + 1, width: CELL - 2, height: CELL - 2, 'class': cellCls };
+        if (cellPat) rectAttrs.fill = 'url(#' + cellPat + ')';
+        var rect3 = svgEl('rect', rectAttrs);
         var rt3 = svgEl('title'); rt3.textContent = pairTitle; rect3.appendChild(rt3);
         svg3.appendChild(rect3);
         if (label) {
@@ -3281,9 +3291,6 @@ var HECVAT_SEC = (function () {
       /* ── INSTITUTION EVALUATION ── */
       if (es.id === 'inst-eval') {
         body.appendChild(mkScorecardTable('inst-eval','Institution Evaluation Report Sections'));
-
-        /* Statistical methods reference — collapsible, collapsed by default */
-        body.appendChild(buildStatMethodsRef());
 
         /* Visual compliance plots — collapsible, collapsed by default */
         body.appendChild(buildCompliancePlots());
