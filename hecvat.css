@@ -260,7 +260,10 @@ header {
   margin: 0 auto;
   padding: 1.25rem 1.5rem 4rem;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* 360px fits "Privacy Analyst Evaluation" + count badge on one line
+     at the 147% font-size (A+ max), since all nav paddings use rem
+     and scale with the root font-size. */
+  grid-template-columns: 360px 1fr;
   gap: 1.5rem;
 }
 
