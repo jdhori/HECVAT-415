@@ -639,19 +639,33 @@ textarea { resize: vertical; min-height: 70px; }
   /* Question label is in aria-label — visually we show only icon+word */
 }
 .ynb:hover     { background: var(--g1); }
-/* Selected state — high contrast, bold, filled background, inset ring, check mark */
+/* Selected state — solid colored box, bold white text, heavy ring.
+   !important used defensively so nothing (theme overrides, specificity
+   from other rules, per-instance rules) can wash out the selection. */
 .ynb.sel-y,
 .ynb.sel-n,
 .ynb.sel-na {
-  color: #fff;
-  font-weight: 800;
-  border-width: 2px;
-  box-shadow: 0 0 0 2px rgba(0,0,0,.08) inset, 0 2px 4px rgba(0,0,0,.15);
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  border-width: 3px !important;
+  border-style: solid !important;
+  box-shadow: 0 0 0 3px rgba(0,0,0,.22) inset, 0 3px 6px rgba(0,0,0,.28) !important;
   transform: translateY(-1px);
 }
-.ynb.sel-y  { background: var(--green); border-color: var(--green); }
-.ynb.sel-n  { background: var(--red);   border-color: var(--red); }
-.ynb.sel-na { background: var(--g4);    border-color: var(--g4); }
+.ynb.sel-y  { background: #15803d !important; border-color: #0b5a2a !important; }
+.ynb.sel-n  { background: #b91c1c !important; border-color: #7f1414 !important; }
+.ynb.sel-na {
+  background-color: #6b6b66 !important;
+  border-color: #45453f !important;
+  /* Repeating question-mark pattern over the grey fill */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.22)'>?</text></svg>") !important;
+  background-repeat: repeat !important;
+  background-size: 22px 22px !important;
+}
+/* Inner icon span — make sure it picks up white too */
+.ynb.sel-y  > *,
+.ynb.sel-n  > *,
+.ynb.sel-na > * { color: #ffffff !important; }
 /* Selected marker pip in the top-right corner for extra clarity */
 .ynb.sel-y::after,
 .ynb.sel-n::after,
@@ -660,10 +674,11 @@ textarea { resize: vertical; min-height: 70px; }
   position: absolute;
   top: 2px;
   right: 4px;
-  font-size: .65rem;
+  font-size: .7rem;
   line-height: 1;
-  color: #fff;
-  opacity: .85;
+  color: #ffffff;
+  opacity: .95;
+  pointer-events: none;
 }
 
 /* ── Compliance indicator ── */
@@ -1191,12 +1206,23 @@ h2.snav-hd-eval { background: #1e3a5f; }
 /* Yes/No/NA buttons */
 [data-theme="dark"] .ynb          { background: var(--input-bg); border-color: var(--input-bdr); color: var(--text2); }
 [data-theme="dark"] .ynb:hover    { background: var(--g2); }
-[data-theme="dark"] .ynb.sel-y    { background: var(--green); border-color: var(--green); color: #0b1b12; }
-[data-theme="dark"] .ynb.sel-n    { background: var(--red);   border-color: var(--red);   color: #1b0b0b; }
-[data-theme="dark"] .ynb.sel-na   { background: var(--g4);    border-color: var(--g4);    color: #0f0f10; }
+/* Dark mode keeps the same solid boxes — bright, easy to see on dark bg */
+[data-theme="dark"] .ynb.sel-y    { background: #1ea555 !important; border-color: #0f5a2b !important; color: #ffffff !important; }
+[data-theme="dark"] .ynb.sel-n    { background: #e04040 !important; border-color: #7a1313 !important; color: #ffffff !important; }
+[data-theme="dark"] .ynb.sel-na   {
+  background-color: #5a5a55 !important;
+  border-color: #2e2e2a !important;
+  color: #ffffff !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.35)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text></svg>") !important;
+  background-repeat: repeat !important;
+  background-size: 22px 22px !important;
+}
+[data-theme="dark"] .ynb.sel-y > *,
+[data-theme="dark"] .ynb.sel-n > *,
+[data-theme="dark"] .ynb.sel-na > * { color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-y::after,
 [data-theme="dark"] .ynb.sel-n::after,
-[data-theme="dark"] .ynb.sel-na::after { color: rgba(0,0,0,.7); }
+[data-theme="dark"] .ynb.sel-na::after { color: #ffffff; opacity: .95; }
 
 /* Analyst selects */
 [data-theme="dark"] .analyst-select {
