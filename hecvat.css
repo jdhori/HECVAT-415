@@ -622,9 +622,13 @@ textarea { resize: vertical; min-height: 70px; }
 .ynb {
   flex: 1;
   padding: .42rem .25rem;
+  /* Unselected: match the neutral tip/guide look (.qguide uses g1 bg +
+     g3 left border) so the buttons read as part of the question card.
+     Selection switches them to their signature color. */
   border: 1.5px solid var(--g2);
-  border-radius: var(--r);
-  background: var(--white);
+  border-left: 3px solid var(--g3);
+  border-radius: 3px;
+  background: var(--g1);
   font-family: var(--font);
   font-size: .76rem;
   font-weight: 600;
@@ -638,7 +642,7 @@ textarea { resize: vertical; min-height: 70px; }
   position: relative;
   /* Question label is in aria-label — visually we show only icon+word */
 }
-.ynb:hover     { background: var(--g1); }
+.ynb:hover     { background: var(--g2); }
 /* Selected state — solid colored box, bold white text, heavy ring.
    !important used defensively so nothing (theme overrides, specificity
    from other rules, per-instance rules) can wash out the selection. */
@@ -681,12 +685,30 @@ textarea { resize: vertical; min-height: 70px; }
   pointer-events: none;
 }
 
-/* ── Compliance indicator ── */
-.cind { font-size: .67rem; font-weight: 700; padding: .16rem .42rem; border-radius: 3px; margin-top: .3rem; display: none; }
+/* ── Compliance indicator — solid filled pop-ups that match the selected
+      Yes/No/NA button styling so users can associate the two visually. ── */
+.cind {
+  font-size: .72rem;
+  font-weight: 800;
+  padding: .3rem .55rem;
+  border-radius: 3px;
+  margin-top: .35rem;
+  display: none;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.18) inset, 0 2px 4px rgba(0,0,0,.2);
+  letter-spacing: .01em;
+}
 .cind.on  { display: block; }
-.cind.ok  { background: var(--green-bg); color: var(--green); }
-.cind.bad { background: var(--red-bg);   color: var(--red); }
-.cind.neu { background: var(--amber-bg); color: var(--amber); }
+.cind.ok  { background: #15803d !important; color: #ffffff !important; border-color: #0b5a2a !important; }
+.cind.bad { background: #b91c1c !important; color: #ffffff !important; border-color: #7f1414 !important; }
+.cind.neu {
+  background-color: #6b6b66 !important;
+  color: #ffffff !important;
+  border-color: #45453f !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.22)'>?</text></svg>") !important;
+  background-repeat: repeat !important;
+  background-size: 22px 22px !important;
+}
 
 /* ── Notes toggle ── */
 .ntog {
@@ -1204,8 +1226,20 @@ h2.snav-hd-eval { background: #1e3a5f; }
 [data-theme="dark"] .qtext        { color: var(--text); }
 
 /* Yes/No/NA buttons */
-[data-theme="dark"] .ynb          { background: var(--input-bg); border-color: var(--input-bdr); color: var(--text2); }
+[data-theme="dark"] .ynb          { background: var(--g1); border-color: var(--g2); border-left-color: var(--g3); color: var(--text2); }
 [data-theme="dark"] .ynb:hover    { background: var(--g2); }
+/* Dark mode: compliance pop-ups keep the same saturated fills for
+   consistent visual association with the selected button color. */
+[data-theme="dark"] .cind.ok  { background: #1ea555 !important; color: #ffffff !important; border-color: #0f5a2b !important; }
+[data-theme="dark"] .cind.bad { background: #e04040 !important; color: #ffffff !important; border-color: #7a1313 !important; }
+[data-theme="dark"] .cind.neu {
+  background-color: #5a5a55 !important;
+  color: #ffffff !important;
+  border-color: #2e2e2a !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'><text x='1' y='16' font-family='Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.35)'>?</text><text x='12' y='9' font-family='Arial,sans-serif' font-size='10' font-weight='700' fill='rgba(255,255,255,0.28)'>?</text></svg>") !important;
+  background-repeat: repeat !important;
+  background-size: 22px 22px !important;
+}
 /* Dark mode keeps the same solid boxes — bright, easy to see on dark bg */
 [data-theme="dark"] .ynb.sel-y    { background: #1ea555 !important; border-color: #0f5a2b !important; color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-n    { background: #e04040 !important; border-color: #7a1313 !important; color: #ffffff !important; }
