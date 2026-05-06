@@ -375,7 +375,8 @@ var HECVAT_SEC = (function () {
       attr(b, 'data-sec', s.id);
 
       var dot = mk('span', 'nd'); attr(dot, 'aria-hidden', 'true'); b.appendChild(dot);
-      b.appendChild(txt(' ' + s.lbl));
+      var lbl = mk('span', 'nb-l'); lbl.appendChild(txt(s.lbl)); b.appendChild(lbl);
+      attr(b, 'title', s.lbl);
 
       /* "Not Required" tag — hidden until gated */
       var tag = mk('span', 'nb-tag hidden'); tag.id = 'nb-tag-' + s.id;
@@ -391,7 +392,9 @@ var HECVAT_SEC = (function () {
     var sb = mk('button', 'nb'); sb.type = 'button'; sb.id = 'nb-summary';
     attr(sb, 'aria-label', 'Assessment summary'); attr(sb, 'aria-current', 'false'); attr(sb, 'data-sec', 'summary');
     var sd = mk('span', 'nd'); attr(sd, 'aria-hidden', 'true'); sb.appendChild(sd);
-    sb.appendChild(txt(' Summary')); nav.appendChild(sb);
+    var slbl = mk('span', 'nb-l'); slbl.appendChild(txt('Summary')); sb.appendChild(slbl);
+    attr(sb, 'title', 'Summary');
+    nav.appendChild(sb);
 
     /* Delegated click */
     nav.addEventListener('click', function (e) {
@@ -3497,7 +3500,8 @@ var HECVAT_SEC = (function () {
       attr(nb,'aria-label',es.lbl+' evaluation section');
       attr(nb,'aria-current','false'); attr(nb,'data-sec',es.id);
       var dot=mk('span','nd'); attr(dot,'aria-hidden','true'); nb.appendChild(dot);
-      nb.appendChild(txt(' '+es.lbl));
+      var elbl = mk('span','nb-l'); elbl.appendChild(txt(es.lbl)); nb.appendChild(elbl);
+      attr(nb, 'title', es.lbl);
       evalNav.appendChild(nb);
 
       /* Panel */
@@ -3793,6 +3797,42 @@ var HECVAT_SEC = (function () {
     /* Double-click either A button to reset to default */
     if (btnFzUp)   btnFzUp.addEventListener('dblclick',   function () { localStorage.removeItem(LS_FZ); applyFz(BASE_PX); });
     if (btnFzDown) btnFzDown.addEventListener('dblclick', function () { localStorage.removeItem(LS_FZ); applyFz(BASE_PX); });
+
+    /* ── Sidebar collapse toggle ──
+       Stores preference in localStorage so the choice persists across reloads.
+       Sidebar contents (labels, count badges, side-btns) are hidden via CSS;
+       each nav button keeps its aria-label so screen reader users still get
+       the full section name even when text is visually hidden. */
+    var btnSbTog  = document.getElementById('btn-sb-toggle');
+    var sbIcon    = btnSbTog ? btnSbTog.querySelector('.sb-tog-icon') : null;
+    var sbLbl     = btnSbTog ? btnSbTog.querySelector('.sb-tog-lbl') : null;
+    var LS_SB     = 'hecvat415_sb';
+    var SB_LEFT   = '\u276E';   /* ❮  collapse direction */
+    var SB_RIGHT  = '\u276F';   /* ❯  expand direction */
+
+    function applySbCollapsed(collapsed) {
+      document.body.classList.toggle('sb-collapsed', collapsed);
+      if (btnSbTog) {
+        attr(btnSbTog, 'aria-expanded', String(!collapsed));
+        attr(btnSbTog, 'aria-label',
+          collapsed ? 'Expand sidebar to show full labels' : 'Collapse sidebar to icon-only view');
+        attr(btnSbTog, 'title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      }
+      if (sbIcon) sbIcon.textContent = collapsed ? SB_RIGHT : SB_LEFT;
+      if (sbLbl)  sbLbl.textContent  = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      try { localStorage.setItem(LS_SB, collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+
+    /* Restore saved preference (default: expanded) */
+    var savedSb = '0';
+    try { savedSb = localStorage.getItem(LS_SB) || '0'; } catch (e) { /* ignore */ }
+    applySbCollapsed(savedSb === '1');
+
+    if (btnSbTog) {
+      btnSbTog.addEventListener('click', function () {
+        applySbCollapsed(!document.body.classList.contains('sb-collapsed'));
+      });
+    }
   }());
 
 }());
