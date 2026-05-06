@@ -355,7 +355,11 @@ body.sb-collapsed .nb.active {
   background: var(--gold-pale);
 }
 body.sb-collapsed .nd {
-  width: 14px; height: 14px;
+  /* Larger ring with the section icon inside — main visual cue
+     when text labels are hidden */
+  width: 32px; height: 32px;
+  font-size: 16px;
+  border-width: 2px;
 }
 body.sb-collapsed .nc {
   position: absolute;
@@ -378,8 +382,43 @@ body.sb-collapsed .snav-hd {
   height: 4px;
   overflow: hidden;
 }
-body.sb-collapsed .side-btns,
 body.sb-collapsed #storage-status { display: none; }
+
+/* Action buttons (Save / Load / Export / Import / Print / Clear) stay
+   in the rail when collapsed — same capabilities as the expanded
+   sidebar, just icon-only. Each button keeps its full aria-label and
+   title for screen readers and hover tooltips. */
+.btn-i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+body.sb-collapsed .side-btns {
+  margin-top: .55rem;
+  gap: .3rem;
+}
+body.sb-collapsed .side-btns .btn {
+  padding: .5rem .25rem;
+  gap: 0;
+  min-height: 36px;
+  justify-content: center;
+}
+body.sb-collapsed .side-btns .btn-i {
+  font-size: 1rem;
+  line-height: 1;
+}
+body.sb-collapsed .side-btns .btn-l {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 .snav {
   background: var(--white);
   border: 1px solid var(--g2);
@@ -411,16 +450,26 @@ body.sb-collapsed #storage-status { display: none; }
 .nb.active  { background: var(--gold-pale); color: var(--navy); font-weight: 700; border-left: 3px solid var(--gold); }
 .nb.dimmed  { opacity: .38; }
 .nb.not-req { color: var(--g4); }
+/* Status / icon ring next to each nav button label.
+   The ring colour encodes state (default, active, done, not-required);
+   the glyph inside is the section icon — adds visual scanning in expanded
+   mode and is the only readable cue in collapsed (icon-only) mode. */
 .nd {
-  width: 7px; height: 7px;
+  width: 22px; height: 22px;
   border-radius: 50%;
-  background: var(--g3);
+  background: var(--g1);
+  border: 1.5px solid var(--g3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
   flex-shrink: 0;
-  transition: background .2s;
+  transition: background .2s, border-color .2s;
 }
-.nb.active .nd { background: var(--gold); }
-.nb.done   .nd { background: var(--green); }
-.nb.not-req .nd { background: var(--g3); }
+.nb.active  .nd { background: var(--gold-pale); border-color: var(--gold); }
+.nb.done    .nd { background: rgba(16,185,129,0.15); border-color: var(--green); }
+.nb.not-req .nd { opacity: .55; }
 .nc {
   margin-left: auto;
   font-size: .65rem;

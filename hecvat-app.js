@@ -247,14 +247,14 @@ var HECVAT_SEC = (function () {
   ================================================================ */
 
   var SECS = [
-    { id: 'start',   lbl: 'Start Here',      desc: 'General information and required routing questions' },
-    { id: 'org',     lbl: 'Organization',     desc: 'Company background, documentation and policies' },
-    { id: 'product', lbl: 'Product',          desc: 'Application, authentication and data practices' },
-    { id: 'infra',   lbl: 'Infrastructure',   desc: 'Hosting, datacenter and infrastructure controls' },
-    { id: 'access',  lbl: 'IT Accessibility', desc: 'WCAG compliance and accessibility practices' },
-    { id: 'case',    lbl: 'Case-Specific',    desc: 'HIPAA, PCI-DSS, consulting and on-premises' },
-    { id: 'ai',      lbl: 'AI',              desc: 'Artificial intelligence features and governance' },
-    { id: 'privacy', lbl: 'Privacy',          desc: 'Data privacy controls and analyst review' },
+    { id: 'start',   lbl: 'Start Here',      icon: '\u25B6',           desc: 'General information and required routing questions' },
+    { id: 'org',     lbl: 'Organization',     icon: '\uD83C\uDFE2',     desc: 'Company background, documentation and policies' },
+    { id: 'product', lbl: 'Product',          icon: '\uD83D\uDCE6',     desc: 'Application, authentication and data practices' },
+    { id: 'infra',   lbl: 'Infrastructure',   icon: '\u2699\uFE0F',     desc: 'Hosting, datacenter and infrastructure controls' },
+    { id: 'access',  lbl: 'IT Accessibility', icon: '\u267F',           desc: 'WCAG compliance and accessibility practices' },
+    { id: 'case',    lbl: 'Case-Specific',    icon: '\uD83C\uDFAF',     desc: 'HIPAA, PCI-DSS, consulting and on-premises' },
+    { id: 'ai',      lbl: 'AI',              icon: '\uD83E\uDD16',     desc: 'Artificial intelligence features and governance' },
+    { id: 'privacy', lbl: 'Privacy',          icon: '\uD83D\uDEE1\uFE0F', desc: 'Data privacy controls and analyst review' },
   ];
 
   /* Section gates: which REQU answer controls whether a section is required */
@@ -374,7 +374,9 @@ var HECVAT_SEC = (function () {
       attr(b, 'aria-current', i === 0 ? 'true' : 'false');
       attr(b, 'data-sec', s.id);
 
-      var dot = mk('span', 'nd'); attr(dot, 'aria-hidden', 'true'); b.appendChild(dot);
+      var dot = mk('span', 'nd'); attr(dot, 'aria-hidden', 'true');
+      if (s.icon) dot.appendChild(txt(s.icon));
+      b.appendChild(dot);
       var lbl = mk('span', 'nb-l'); lbl.appendChild(txt(s.lbl)); b.appendChild(lbl);
       attr(b, 'title', s.lbl);
 
@@ -391,7 +393,9 @@ var HECVAT_SEC = (function () {
     /* Summary button */
     var sb = mk('button', 'nb'); sb.type = 'button'; sb.id = 'nb-summary';
     attr(sb, 'aria-label', 'Assessment summary'); attr(sb, 'aria-current', 'false'); attr(sb, 'data-sec', 'summary');
-    var sd = mk('span', 'nd'); attr(sd, 'aria-hidden', 'true'); sb.appendChild(sd);
+    var sd = mk('span', 'nd'); attr(sd, 'aria-hidden', 'true');
+    sd.appendChild(txt('\uD83D\uDCCA'));   /* 📊 — summary */
+    sb.appendChild(sd);
     var slbl = mk('span', 'nb-l'); slbl.appendChild(txt('Summary')); sb.appendChild(slbl);
     attr(sb, 'title', 'Summary');
     nav.appendChild(sb);
@@ -3499,7 +3503,9 @@ var HECVAT_SEC = (function () {
       var nb = mk('button','nb'); nb.type='button'; nb.id='nb-'+es.id;
       attr(nb,'aria-label',es.lbl+' evaluation section');
       attr(nb,'aria-current','false'); attr(nb,'data-sec',es.id);
-      var dot=mk('span','nd'); attr(dot,'aria-hidden','true'); nb.appendChild(dot);
+      var dot=mk('span','nd'); attr(dot,'aria-hidden','true');
+      if (es.icon) dot.appendChild(txt(es.icon));
+      nb.appendChild(dot);
       var elbl = mk('span','nb-l'); elbl.appendChild(txt(es.lbl)); nb.appendChild(elbl);
       attr(nb, 'title', es.lbl);
       evalNav.appendChild(nb);
