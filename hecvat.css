@@ -135,6 +135,38 @@ header {
 .hdr-title p  { font-size: .72rem; color: #ffffff; }
 .hdr-date     { font-size: .72rem; color: #ffffff; white-space: nowrap; margin-left: auto; }
 
+/* ── Header evaluator initials ── */
+.hdr-initials {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-shrink: 0;
+}
+.hdr-initials-lbl {
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #ffffff;
+  white-space: nowrap;
+}
+.hdr-initials-in {
+  width: 4.5rem;
+  height: 2rem;
+  padding: 0 .5rem;
+  border: 1.5px solid rgba(255,255,255,.25);
+  border-radius: var(--r);
+  background: rgba(255,255,255,.08);
+  color: #ffffff;
+  font-family: var(--font);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.hdr-initials-in::placeholder { color: rgba(255,255,255,.45); font-weight: 400; letter-spacing: normal; }
+.hdr-initials-in:focus { outline: 2px solid var(--gold2); outline-offset: 2px; border-color: var(--gold2); }
+
 /* ── Header display controls (theme + font size) ── */
 .hdr-controls {
   display: flex;
@@ -186,7 +218,18 @@ header {
 /* Responsive: collapse date on small screens, keep controls */
 @media (max-width: 700px) {
   .hdr-date { display: none; }
-  .hdr-controls { margin-left: auto; }
+  /* Visually hide the label but keep it in the a11y tree so the input
+     retains its accessible name (do NOT use display:none here). */
+  .hdr-initials-lbl {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .hdr-initials { margin-left: auto; }
 }
 @media (max-width: 480px) {
   .hdr-fz-display { display: none; }

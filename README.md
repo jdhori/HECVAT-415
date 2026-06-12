@@ -14,12 +14,20 @@ HECVAT-415/
 ├── hecvat-app.js      — Application logic
 ├── hecvat.css         — Stylesheet
 ├── hecvat-worker.js   — Web Worker for isolated XLSX import parsing
-└── xlsx.mini.min.js   — SheetJS library (loaded by the worker)
+├── xlsx.mini.min.js   — SheetJS library (loaded by the worker)
+├── fflate.min.js      — Local zip read/write (used by the XLSX export)
+├── hecvat-template.js — Base64 of the official HECVAT 4.1.5 workbook, loaded
+│                        on demand to power the vendor Excel export
+└── HECVAT415.xlsx     — Source workbook, kept only to regenerate the template
+                         (not loaded at runtime)
 ```
 
-All six files must stay in the **same folder**. The HTML file references the
-others by relative path, and `hecvat-worker.js` loads `xlsx.mini.min.js` via
-`importScripts`, so moving any of them apart will break the tool.
+The runtime files must stay in the **same folder**. The HTML file references
+the others by relative path, and `hecvat-worker.js` loads `xlsx.mini.min.js`
+via `importScripts`, so moving any of them apart will break the tool.
+`hecvat-template.js` is loaded lazily the first time you export to Excel, so
+page load stays light. `HECVAT415.xlsx` is kept in the repo only as the source
+for regenerating `hecvat-template.js`; it is never fetched by the running tool.
 
 ---
 
@@ -201,13 +209,16 @@ completed submission:
 **Persistence:** Every Importance Override, Compliance Override,
 Non-Negotiable flag, and Analyst Notes field is saved with **Save
 Progress** (encrypted together with vendor responses), included in the
-**JSON** export (as a separate `analystEvaluations` map), added as four
+**JSON** export (as a separate `analystEvaluations` map), and added as four
 extra columns on the **CSV** export (`Importance Override`,
-`Compliance Override`, `Non-Negotiable`, `Analyst Notes`), and written
-to a dedicated **Analyst Evaluation** sheet in the XLSX export when
-overrides are present. Re-importing JSON or CSV restores every
-override to its original state, so analyst reviews can be handed off
-between reviewers or archived alongside the vendor submission.
+`Compliance Override`, `Non-Negotiable`, `Analyst Notes`). Re-importing JSON
+or CSV restores every override to its original state, so analyst reviews can
+be handed off between reviewers or archived alongside the vendor submission.
+
+Analyst evaluations are **deliberately excluded from the Excel export**, which
+is a vendor-facing deliverable (see *Export Excel (for vendors)* below). Keep
+analyst overrides in the JSON/CSV exports, which are the evaluator-facing
+formats.
 
 ### Compliance Plots
 
@@ -302,6 +313,15 @@ responses and want to ensure no assessment data remains in the browser.
 
 ## Exporting Responses
 
+The export formats are split by audience:
+
+- **Excel (`.xlsx`) is for vendors.** It produces a fully working copy of the
+  official EDUCAUSE HECVAT 4.1.5 workbook with your answers filled in — the one
+  a vendor shares with the institutions assessing them.
+- **JSON and CSV are for evaluators.** They round-trip both vendor responses
+  and analyst overrides, carry the evaluator's initials, and can be merged
+  between reviewers.
+
 ### Export JSON
 
 Exports a structured `.json` file containing:
@@ -352,6 +372,66 @@ reviewers. Re-importing the CSV restores both responses and overrides.
 > **Formula injection protection:** Any cell value beginning with `= + - @`
 > is automatically prefixed with a single quote so spreadsheet applications
 > treat it as plain text rather than a formula.
+
+### Export Excel (for vendors)
+
+**Export XLSX** produces a completed copy of the **official EDUCAUSE HECVAT
+4.1.5 workbook** — not a stripped-down rebuild. The tool starts from the real
+workbook bundled with this app and injects only your answers into the vendor
+answer cells, leaving everything else untouched:
+
+- Every native **formula**, the hidden **scoring engine**, and all
+  cross-sheet references are preserved, so scores and compliance verdicts
+  recompute themselves when the file is opened.
+- The **Yes / No / N/A dropdowns**, conditional formatting, and sheet layout
+  are exactly as EDUCAUSE ships them.
+- Your answers go into column **C** (response) and column **D** (additional
+  info) on the eight vendor sheets, matched to each question by its ID.
+- The workbook is flagged to **recalculate on open**, so the institution
+  receiving it sees live numbers without any copy-paste.
+
+This is the format a vendor fills out and hands to the institutions assessing
+them — anyone who prefers the canonical Excel tool gets a ready-to-submit file
+instead of having to transcribe answers by hand. Analyst-only fields are *not*
+written to this file; it is purely the vendor's response document.
+
+> Because the export is the official workbook, it round-trips back through
+> **Import XLSX**, and opens in Excel, LibreOffice, and Google Sheets with the
+> scoring intact.
+
+### Evaluator initials
+
+The header has an **Evaluator initials** field. Enter your initials once and
+they are remembered in this browser (and folded into your encrypted save).
+Initials make evaluator hand-offs traceable:
+
+- They are written at the **end of the JSON and CSV exports** (a top-level
+  `evaluatorInitials` key in JSON; a trailing `# Evaluator Initials` row in
+  CSV).
+- When you **merge** someone else's JSON/CSV into your copy (see below), each
+  comment that file contributes is **prefixed with that file's initials**
+  (e.g. `[JD] Needs MFA before launch`), so you can see who said what.
+
+Initials are an evaluator convenience and are intentionally **not** written
+into the vendor Excel export.
+
+### Importing & merging
+
+**Import JSON**, **Import CSV**, and **Import XLSX** bring answers back into the
+form. Imports **merge** — they never silently overwrite your work:
+
+- A non-empty answer in the file fills in or updates the matching question; a
+  blank field in the file will **not** erase an answer you have already typed.
+- **Comments are combined, not replaced** — an imported note is appended to any
+  note you already have (and re-importing the same file is idempotent, so notes
+  never pile up duplicates).
+- For evaluator JSON/CSV files, imported comments are labelled with the source
+  file's **evaluator initials** so multiple reviewers can be consolidated into
+  one copy with clear attribution.
+
+This lets two or more evaluators work in parallel and then merge their copies
+together, or lets an evaluator merge a vendor's submission into a working copy
+without losing their own annotations.
 
 ### Print
 
@@ -508,7 +588,7 @@ Every server configuration sets these headers:
 
 ### Deployment on Netlify or Cloudflare Pages
 
-1. Copy the six tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`, `hecvat-worker.js`, `xlsx.mini.min.js`) and the `_headers` file into your repository root.
+1. Copy the runtime tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`, `hecvat-worker.js`, `xlsx.mini.min.js`, `fflate.min.js`, `hecvat-template.js`) and the `_headers` file into your repository root. (`HECVAT415.xlsx` is source-only and does not need to be deployed.)
 2. Set your publish directory to the repository root.
 3. Deploy. Both platforms automatically apply the `_headers` file.
 

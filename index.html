@@ -34,6 +34,15 @@
       </div>
       <div class="hdr-date" id="hdr-date" aria-label="Today's date"></div>
 
+      <!-- Evaluator initials: labels this person's comments on export/merge -->
+      <div class="hdr-initials">
+        <label class="hdr-initials-lbl" for="eval-initials">Evaluator initials</label>
+        <input class="hdr-initials-in" id="eval-initials" type="text"
+               maxlength="8" autocomplete="off" spellcheck="false"
+               placeholder="ABC" aria-describedby="eval-initials-help">
+        <span id="eval-initials-help" class="sr-only">Your initials are added to the exported file and used to label your comments when assessments are merged.</span>
+      </div>
+
       <!-- Display controls: dark mode + font size — in header for persistent access -->
       <div class="hdr-controls" role="toolbar" aria-label="Display settings">
         <button class="hdr-ctrl-btn" id="btn-theme" type="button"
@@ -149,8 +158,12 @@
 
   </div>
 
-  <!-- SheetJS — local bundle for XLSX parsing, no external network request -->
+  <!-- SheetJS — local bundle for XLSX parsing (import), no external network request -->
   <script src="xlsx.mini.min.js"></script>
+  <!-- fflate — local zip read/write used to inject answers into the official
+       HECVAT workbook on export. The ~1.2 MB template (hecvat-template.js) is
+       loaded on demand by hecvat-app.js, not here, to keep page load light. -->
+  <script src="fflate.min.js"></script>
   <!-- Data must load before app logic -->
   <script src="hecvat-data.js"></script>
   <script src="hecvat-app.js"></script>

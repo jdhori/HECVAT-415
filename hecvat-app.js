@@ -302,6 +302,7 @@ var HECVAT_SEC = (function () {
   var RS = {};                 // per-section overrides when a secondary instance is UNLINKED
                                //   key = secId + ':' + qid  →  { value, notes }
   var AE = {};                 // analyst evaluations: { qid: { impOverride, compOverride, nonNeg, analystNotes } }
+  var EVAL_INITIALS = '';      // current evaluator's initials — labels their comments on export/merge
   var renderedIn = {};         // qid -> first secId rendered (authoritative for scoring)
   var xrefRegistry = [];       // [{ qid, el }] live cross-ref display elements (unused now — kept for compat)
   var secondaryReg = {};       // qid -> [ { secId, linked, updateUI(val), updateNotes(n) } ]
@@ -1517,7 +1518,7 @@ var HECVAT_SEC = (function () {
     /* Persist both the vendor responses (R) and the analyst evaluations
        (AE) together in a single envelope. Older saves (bare R map) stay
        readable via the shape detection in loadData below. */
-    HECVAT_SEC.saveEncrypted({ responses: R, evaluations: AE }).then(function () {
+    HECVAT_SEC.saveEncrypted({ responses: R, evaluations: AE, initials: EVAL_INITIALS }).then(function () {
       var ann = Object.keys(AE).length;
       setStatus('Saved \u2014 AES-256-GCM encrypted' + (ann ? ' (' + ann + ' analyst override(s) included)' : ''), 'ok');
     }).catch(function (e) {
@@ -1538,6 +1539,7 @@ var HECVAT_SEC = (function () {
       if (raw && typeof raw === 'object' && raw.responses && typeof raw.responses === 'object' && !Array.isArray(raw.responses)) {
         rawR  = raw.responses;
         rawAE = (raw.evaluations && typeof raw.evaluations === 'object' && !Array.isArray(raw.evaluations)) ? raw.evaluations : {};
+        if (raw.initials) setInitials(raw.initials);
       }
 
       /* Validate every record before accepting it */
@@ -1621,6 +1623,9 @@ var HECVAT_SEC = (function () {
     );
     if (!confirmed) return;
     HECVAT_SEC.clearAll();
+    /* Initials are user-entered data, not a display preference, so clear them
+       too rather than letting them survive the reset. */
+    try { localStorage.removeItem(LS_INITIALS); } catch (e) { /* non-fatal */ }
     /* Reset in-memory state and reload for a clean slate */
     window.location.reload();
   }
@@ -1699,6 +1704,9 @@ var HECVAT_SEC = (function () {
         };
       }
     });
+    /* Evaluator initials recorded at the end of the file; used to label this
+       evaluator's comments when the export is later merged into another copy. */
+    data.evaluatorInitials = sanitizeInitials(EVAL_INITIALS);
     dl(JSON.stringify(data, null, 2), 'application/json', 'HECVAT-415-responses.json');
     setStatus('JSON exported \u2014 handle as confidential', 'warn');
   }
@@ -1730,6 +1738,10 @@ var HECVAT_SEC = (function () {
         ae.nonNeg ? 'Yes' : '', ae.analystNotes || ''
       ]);
     });
+    /* Trailing metadata row carrying the evaluator's initials, parsed back on
+       import to label this evaluator's comments when merging. */
+    var ini = sanitizeInitials(EVAL_INITIALS);
+    if (ini) rows.push(['# Evaluator Initials', ini]);
     dl(rows.map(function (r) {
       return r.map(safeCsvCell).join(',');
     }).join('\n'), 'text/csv', 'HECVAT-415-responses.csv');
@@ -1793,7 +1805,10 @@ var HECVAT_SEC = (function () {
       var rawAE = (parsed && typeof parsed.analystEvaluations === 'object' && !Array.isArray(parsed.analystEvaluations))
                     ? parsed.analystEvaluations
                     : null;
-      applyImport(raw, file.name, rawAE);
+      /* File-level evaluator initials, if the export carried them, used to
+         label the imported comments. */
+      var fileIni = (parsed && (parsed.evaluatorInitials || (parsed.meta && parsed.meta.evaluatorInitials))) || '';
+      applyImport(raw, file.name, rawAE, fileIni);
     };
     reader.readAsText(file);
   }
@@ -1813,7 +1828,7 @@ var HECVAT_SEC = (function () {
       var parsed;
       try { parsed = parseCSVToMap(ev.target.result); }
       catch (err) { setStatus('CSV error: ' + err.message, 'error'); return; }
-      applyImport(parsed.responses, file.name, parsed.evaluations);
+      applyImport(parsed.responses, file.name, parsed.evaluations, parsed.initials);
     };
     reader.readAsText(file);
   }
@@ -1878,11 +1893,19 @@ var HECVAT_SEC = (function () {
       return s;
     }
 
-    var responses = {}, evaluations = {};
+    var responses = {}, evaluations = {}, initials = '';
     for (var li = 1; li < rows.length; li++) {
       var cells = rows[li];
       var qid   = (cells[idCol] || '').trim();
       if (!qid) continue;
+
+      /* Trailing metadata row carrying the evaluator's initials, written by
+         exportCSV as:  "# Evaluator Initials","ABC"  — capture, don't treat
+         it as a response. */
+      if (qid.toLowerCase() === '# evaluator initials') {
+        initials = stripInjectPrefix((cells[idCol + 1] || '').trim());
+        continue;
+      }
 
       /* Responses half */
       var entry = {};
@@ -1919,7 +1942,7 @@ var HECVAT_SEC = (function () {
     if (Object.keys(responses).length === 0 && Object.keys(evaluations).length === 0) {
       throw new Error('No response or analyst-evaluation data found in CSV.');
     }
-    return { responses: responses, evaluations: evaluations };
+    return { responses: responses, evaluations: evaluations, initials: initials };
   }
 
   /* ================================================================
@@ -2031,7 +2054,30 @@ var HECVAT_SEC = (function () {
     if (!Object.keys(map).length) throw new Error('No answers found in this file.');
     return map;
   }
-  function applyImport(raw, fileName, rawAE) {
+  /* Keep only a short, safe set of characters for initials (letters,
+     digits, dot, hyphen) and cap the length. Returns '' for junk. */
+  function sanitizeInitials(s) {
+    return String(s == null ? '' : s)
+      .replace(/[^A-Za-z0-9.\-]/g, '')
+      .slice(0, 8);
+  }
+
+  /* Prefix every non-blank line of an imported comment with the source
+     file's evaluator initials, e.g. "[ABC] ...". Lines that already carry
+     an attribution tag ("[XX] ") are left as-is so re-labelling and
+     re-importing stay idempotent. With no initials the text is unchanged. */
+  function labelNote(text, initials) {
+    var ini = sanitizeInitials(initials);
+    if (!ini) return text;
+    var tag = '[' + ini + '] ';
+    return String(text).split('\n').map(function (line) {
+      if (!line.trim()) return line;
+      if (/^\[[^\]]+\]\s/.test(line)) return line;
+      return tag + line;
+    }).join('\n');
+  }
+
+  function applyImport(raw, fileName, rawAE, fileInitials) {
     var clean = {}, accepted = 0, dropped = 0;
     Object.keys(raw || {}).forEach(function (qid) {
       var rec = HECVAT_SEC.validateRecord(qid, raw[qid]);
@@ -2061,17 +2107,33 @@ var HECVAT_SEC = (function () {
       if (existingAE) parts.push(existingAE + ' existing analyst override(s)');
       var ok = window.confirm(
         'You have ' + parts.join(' and ') + '.\n\n' +
-        'Importing will merge the file with your current state.\n' +
-        'Imported values overwrite any conflicting existing values.\n\nContinue?'
+        'Importing will merge the file into your current state.\n' +
+        'Answers in the file fill in or update matching questions and\n' +
+        'comments are combined with any you have already entered; blank\n' +
+        'fields in the file will NOT erase anything you have already entered.\n\nContinue?'
       );
       if (!ok) { setStatus('Import cancelled.', ''); return; }
     }
 
-    /* Merge: imported values win on conflict */
+    /* Merge, don't clobber. A non-empty imported value wins on conflict, but
+       a blank field in the imported file must never erase an answer already
+       present in the form — otherwise importing a partially-filled file would
+       wipe details the user has typed (the app's JSON export emits empty
+       value/notes strings for partially-filled questions).
+       Notes (Additional Information / comments) are COMBINED rather than
+       replaced: an imported comment is appended to any existing comment
+       instead of overwriting it. Re-importing the same file is idempotent
+       because an imported comment already contained in the current text is
+       not appended again. */
     Object.keys(clean).forEach(function (qid) {
       R[qid] = R[qid] || {};
-      if (clean[qid].value !== undefined) R[qid].value = clean[qid].value;
-      if (clean[qid].notes !== undefined) R[qid].notes = clean[qid].notes;
+      if (clean[qid].value) R[qid].value = clean[qid].value;
+      if (clean[qid].notes) {
+        var incoming = labelNote(clean[qid].notes, fileInitials);
+        var current  = R[qid].notes;
+        if (!current) R[qid].notes = incoming;
+        else if (current.indexOf(incoming) === -1) R[qid].notes = current + '\n' + incoming;
+      }
     });
     Object.keys(cleanAE).forEach(function (qid) {
       AE[qid] = AE[qid] || {};
@@ -2102,150 +2164,177 @@ var HECVAT_SEC = (function () {
 
   /* ================================================================
      EXPORT — HECVAT EXCEL (.xlsx)
-     Produces a workbook with 8 vendor response sheets + Score Summary,
-     matching the official HECVAT column layout so recipients can
-     open it alongside the official spreadsheet with columns aligned:
-       A = Question ID  |  B = Question text  |  C = Answer
-       D = Notes        |  E = Compliance     |  F = Importance
+     Injects the saved answers into a copy of the official EDUCAUSE
+     HECVAT 4.1.5 workbook (bundled, base64-encoded in hecvat-template.js)
+     so the exported file keeps EVERY native feature of the real tool:
+     the Yes/No/N-A dropdowns, the hidden scoring engine, conditional
+     formatting and all worksheet formulas. Only the vendor input cells
+     are written — column C (Answer) and column D (Additional Information)
+     of the eight vendor tabs, keyed by Question ID. Cross-reference cells
+     that auto-populate via formula are left untouched, and recalculation
+     is forced so scores update the moment the file is opened.
+
+     The ~1.2 MB template module is loaded lazily on first export so it
+     does not weigh down initial page load.
   ================================================================ */
+  /* The eight vendor-response tabs of the official workbook, in the order
+     answers are filled. Column C = Answer, column D = Additional Information. */
+  var XLSX_VENDOR_SHEETS = [
+    'START HERE', 'Organization', 'Product', 'Infrastructure',
+    'IT Accessibility', 'Case-Specific', 'AI', 'Privacy',
+  ];
+  var QID_CELL_RE = /^[A-Z]{2,5}-\d{1,3}$/;
+
+  /* Lazily load the bundled official template (base64) on first export so
+     the ~1.2 MB payload never delays initial page load. */
+  function loadXLSXTemplate() {
+    return new Promise(function (resolve, reject) {
+      if (typeof HECVAT_XLSX_TEMPLATE_B64 !== 'undefined') { resolve(); return; }
+      var s = document.createElement('script');
+      s.src = 'hecvat-template.js';
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('Could not load the Excel template (hecvat-template.js).')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function base64ToBytes(b64) {
+    var bin = atob(b64);
+    var len = bin.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function xmlEscape(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /* Build { sheetName: 'xl/worksheets/sheetN.xml' } from the workbook part. */
+  function mapSheetFiles(files, dec) {
+    var wbXml   = dec(files['xl/workbook.xml']);
+    var relsXml = dec(files['xl/_rels/workbook.xml.rels']);
+    var relTarget = {};
+    var relRe = /<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/>/g, rm;
+    while ((rm = relRe.exec(relsXml))) relTarget[rm[1]] = rm[2];
+    var nameToFile = {};
+    var shRe = /<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/>/g, sm;
+    while ((sm = shRe.exec(wbXml))) {
+      var tgt = relTarget[sm[2]];
+      if (tgt) nameToFile[sm[1]] = 'xl/' + tgt.replace(/^\/?xl\//, '');
+    }
+    return nameToFile;
+  }
+
+  /* Resolve sharedStrings.xml into an array of plain-text values so we can
+     read the Question ID stored in column A of each row. */
+  function readSharedStrings(xml) {
+    var items = [];
+    var re = /<si>([\s\S]*?)<\/si>/g, m;
+    while ((m = re.exec(xml))) {
+      items.push(m[1].replace(/<rPh[\s\S]*?<\/rPh>/g, '').replace(/<[^>]+>/g, ''));
+    }
+    return items;
+  }
+
+  /* Replace one cell (self-closing or with content) inside a row string,
+     preserving its style. Skips cells that contain a formula. Returns the
+     new row string, or the original if the cell is a formula / not found. */
+  function setCellValue(rowXml, col, rownum, value) {
+    var ref = col + rownum;
+    var selfRe = new RegExp('<c r="' + ref + '"(?:[^>]*?)/>');
+    var openRe = new RegExp('<c r="' + ref + '"[^>]*?>[\\s\\S]*?</c>');
+    var match = selfRe.exec(rowXml);
+    var style = '';
+    if (match) {
+      var sm = / s="(\d+)"/.exec(match[0]);
+      style = sm ? ' s="' + sm[1] + '"' : '';
+    } else {
+      match = openRe.exec(rowXml);
+      if (!match) return rowXml;            // no such cell on this row
+      if (/<f>/.test(match[0])) return rowXml; // formula cell — leave it alone
+      var sm2 = / s="(\d+)"/.exec(match[0]);
+      style = sm2 ? ' s="' + sm2[1] + '"' : '';
+    }
+    var repl = '<c r="' + ref + '"' + style + ' t="inlineStr"><is><t xml:space="preserve">'
+             + xmlEscape(value) + '</t></is></c>';
+    return rowXml.replace(match[0], repl);
+  }
+
+  /* Inject saved answers into one vendor worksheet's XML. */
+  function injectAnswersIntoSheet(sheetXml, sharedStrings) {
+    var rows = sheetXml.match(/<row\b[\s\S]*?<\/row>/g);
+    if (!rows) return { xml: sheetXml, count: 0 };
+    var out = sheetXml, count = 0;
+    rows.forEach(function (row) {
+      var a = /<c r="A(\d+)"[^>]*t="s"[^>]*><v>(\d+)<\/v>/.exec(row);
+      if (!a) return;
+      var qid = sharedStrings[+a[2]];
+      if (!qid || !QID_CELL_RE.test(qid)) return;
+      var resp = R[qid];
+      if (!resp) return;
+      var rownum = a[1];
+      var newRow = row;
+      if (resp.value)  newRow = setCellValue(newRow, 'C', rownum, resp.value);
+      if (resp.notes)  newRow = setCellValue(newRow, 'D', rownum, resp.notes);
+      if (newRow !== row) { out = out.replace(row, newRow); count++; }
+    });
+    return { xml: out, count: count };
+  }
+
   function exportXLSX() {
-    if (typeof XLSX === 'undefined') {
-      setStatus('XLSX library not loaded \u2014 refresh and try again.', 'error');
+    if (typeof fflate === 'undefined') {
+      setStatus('Excel engine not loaded \u2014 refresh and try again.', 'error');
       return;
     }
+    setStatus('Building Excel workbook\u2026', '');
 
-    var VENDOR_SHEETS = [
-      { name: 'START HERE',       cats: ['GNRL','COMP','REQU'] },
-      { name: 'Organization',     cats: ['DOCU','THRD','PPPR','CHNG','CONS'] },
-      { name: 'Product',          cats: ['APPL','AAAI','DATA'] },
-      { name: 'Infrastructure',   cats: ['DCTR','FIDP','HFIH','VULN'] },
-      { name: 'IT Accessibility', cats: ['ITAC'] },
-      { name: 'Case-Specific',    cats: ['HIPA','PCID','OPEM'] },
-      { name: 'AI',               cats: ['AIQU','AIGN','AIPL','AISC','AIML','AILM'] },
-      { name: 'Privacy',          cats: ['PRGN','PCOM','PDOC','PTHP','PCHG','PDAT','PRPO','INTL','DRPV','DPAI'] },
-    ];
-    var sectionNameMap = {
-      'start':'START HERE','org':'Organization','product':'Product',
-      'infra':'Infrastructure','access':'IT Accessibility',
-      'case':'Case-Specific','ai':'AI','privacy':'Privacy',
-    };
+    loadXLSXTemplate().then(function () {
+      var dec = fflate.strFromU8, enc = fflate.strToU8;
+      var files = fflate.unzipSync(base64ToBytes(HECVAT_XLSX_TEMPLATE_B64));
 
-    var wb = XLSX.utils.book_new();
+      var sharedStrings = readSharedStrings(dec(files['xl/sharedStrings.xml']));
+      var sheetFiles    = mapSheetFiles(files, dec);
 
-    /* ── Score Summary sheet ── */
-    var summaryRows = [
-      ['HECVAT 4.1.5 \u2014 Score Summary'],
-      ['Generated', new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})],
-      ['Notice','Exported from the HECVAT 4.1.5 Web Form. Unofficial implementation \u2014 not affiliated with EDUCAUSE.'],
-      [],
-      ['Score Location','Earned (pts)','Possible (pts)','Score %','Questions'],
-    ];
-    var scoreGroups = {};
-    HECVAT_QUESTIONS.forEach(function(q) {
-      if (q.loc === 'Not Scored' || q.score === 'NA') return;
-      (scoreGroups[q.loc] = scoreGroups[q.loc] || []).push(q);
-    });
-    var totalE = 0, totalP = 0;
-    Object.keys(scoreGroups).sort().forEach(function(loc) {
-      var qs = scoreGroups[loc], earned = 0, pot = 0;
-      qs.forEach(function(q) {
-        var p = q.imp === 'Critical Importance' ? 20 : q.imp === 'Standard Importance' ? 10 : q.imp === 'Minor Importance' ? 5 : 0;
-        if (!p) return; pot += p;
-        var v = R[q.id] && R[q.id].value;
-        if (!v) return; if (v === 'N/A') { pot -= p; return; }
-        if (q.comp ? v === q.comp : v === 'Yes') earned += p;
-      });
-      totalE += earned; totalP += pot;
-      summaryRows.push([loc, earned, pot, pot > 0 ? Math.round(earned/pot*100)+'%' : 'N/A', qs.length]);
-    });
-    summaryRows.push([], ['OVERALL SCORE', totalE, totalP, totalP > 0 ? Math.round(totalE/totalP*100)+'%' : 'N/A', '']);
-    var wsSumm = XLSX.utils.aoa_to_sheet(summaryRows);
-    wsSumm['!cols'] = [{wch:28},{wch:14},{wch:14},{wch:10},{wch:10}];
-    XLSX.utils.book_append_sheet(wb, wsSumm, 'Score Summary');
-
-    /* ── Vendor response sheets ── */
-    VENDOR_SHEETS.forEach(function(def) {
-      var rows = [
-        ['HECVAT 4.1.5 \u2014 ' + def.name,
-         'Exported: ' + new Date().toLocaleDateString(),
-         'UNOFFICIAL \u2014 Not affiliated with EDUCAUSE', '', '', ''],
-        ['Question ID','Question','Answer','Notes / Additional Information','Compliance','Importance'],
-      ];
-
-      HECVAT_QUESTIONS.forEach(function(q) {
-        /* Determine if this question belongs in this sheet */
-        var cat = q.id.slice(0,4);
-        var isPrimary  = def.cats.indexOf(cat) > -1;
-        var isCrossRef = !isPrimary && q.sections.some(function(s){ return sectionNameMap[s] === def.name; });
-        if (!isPrimary && !isCrossRef) return;
-
-        var resp = R[q.id] || {};
-        var val  = resp.value || '';
-        var notes = resp.notes || '';
-        if (isCrossRef && val) notes = (notes ? notes + ' ' : '') + '[See primary section for ' + q.id + ']';
-
-        var compStr = '';
-        if (val === 'N/A') { compStr = 'N/A'; }
-        else if (val) { compStr = (q.comp ? val === q.comp : val === 'Yes') ? 'Compliant' : 'Non-Compliant'; }
-
-        rows.push([q.id, q.q, val, notes, compStr, q.imp || '']);
+      var answered = 0;
+      XLSX_VENDOR_SHEETS.forEach(function (name) {
+        var file = sheetFiles[name];
+        if (!file || !files[file]) return;
+        var res = injectAnswersIntoSheet(dec(files[file]), sharedStrings);
+        files[file] = enc(res.xml);
+        answered += res.count;
       });
 
-      var ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [{wch:12},{wch:65},{wch:12},{wch:45},{wch:16},{wch:22}];
-      ws['!freeze'] = { xSplit: 0, ySplit: 2 };
-      XLSX.utils.book_append_sheet(wb, ws, def.name);
-    });
-
-    /* ── Analyst Evaluation sheet (only if any overrides are set) ── */
-    var aeKeys = Object.keys(AE).filter(function (qid) {
-      var ae = AE[qid];
-      return ae && (ae.impOverride || ae.compOverride || ae.nonNeg || ae.analystNotes);
-    });
-    if (aeKeys.length) {
-      var aeRows = [
-        ['HECVAT 4.1.5 \u2014 Analyst Evaluation',
-         'Exported: ' + new Date().toLocaleDateString(),
-         'Institution / Privacy Analyst overrides applied to the vendor response',
-         '', '', ''],
-        ['Question ID', 'Question',
-         'Importance Override', 'Compliance Override',
-         'Non-Negotiable', 'Analyst Notes'],
-      ];
-      aeKeys.forEach(function (qid) {
-        var q = HECVAT_QUESTIONS.find(function (x) { return x.id === qid; });
-        if (!q) return;
-        var ae = AE[qid];
-        aeRows.push([
-          qid, q.q,
-          ae.impOverride  || '',
-          ae.compOverride || '',
-          ae.nonNeg ? 'Yes' : '',
-          ae.analystNotes || ''
-        ]);
+      /* Force a full recalculation when the file is opened so every score,
+         compliance verdict and cross-reference reflects the new answers. */
+      var wbXml = dec(files['xl/workbook.xml']);
+      wbXml = wbXml.replace(/<calcPr([^>]*?)\/>/, function (m, attrs) {
+        return '<calcPr' + attrs.replace(/\s*fullCalcOnLoad="[^"]*"/, '') + ' fullCalcOnLoad="1"/>';
       });
-      var wsAE = XLSX.utils.aoa_to_sheet(aeRows);
-      wsAE['!cols'] = [{wch:12},{wch:65},{wch:22},{wch:24},{wch:16},{wch:50}];
-      wsAE['!freeze'] = { xSplit: 0, ySplit: 2 };
-      XLSX.utils.book_append_sheet(wb, wsAE, 'Analyst Evaluation');
-    }
+      files['xl/workbook.xml'] = enc(wbXml);
 
-    /* Trigger download */
-    var today = new Date().toISOString().slice(0,10);
-    var fname = 'HECVAT-415-Responses-' + today + '.xlsx';
-    try {
-      XLSX.writeFile(wb, fname);
-    } catch (e) {
-      var buf  = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-      var blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
+      /* No evaluator initials are written here: the XLSX export is the
+         VENDOR's document (the fillable official HECVAT workbook they share),
+         not evaluator content. Initials only attach to the evaluator-facing
+         JSON/CSV exports. */
+
+      var zipped = fflate.zipSync(files, { level: 6 });
+      var today  = new Date().toISOString().slice(0, 10);
+      var fname  = 'HECVAT-415-' + today + '.xlsx';
+      var blob   = new Blob([zipped], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      var url    = URL.createObjectURL(blob);
+      var a      = document.createElement('a');
       a.href = url; a.download = fname;
       document.body.appendChild(a); a.click();
       document.body.removeChild(a);
-      setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
-    }
-    setStatus('Excel exported \u2014 handle as confidential.', 'warn');
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+
+      setStatus('Excel exported (' + answered + ' answers written) \u2014 handle as confidential.', 'warn');
+    }).catch(function (err) {
+      setStatus('Excel export failed: ' + err.message, 'error');
+    });
   }
 
   /* ================================================================
@@ -2263,6 +2352,35 @@ var HECVAT_SEC = (function () {
     document.getElementById('btn-imp-xlsx').addEventListener('click', importXLSX);
     document.getElementById('btn-prt').addEventListener('click',  function () { window.print(); });
     document.getElementById('btn-clear').addEventListener('click', clearData);
+  }
+
+  /* ================================================================
+     EVALUATOR INITIALS
+     Persisted to localStorage so the entry survives a reload without a
+     full save, and also folded into the encrypted save envelope and the
+     export files so the attribution travels with the assessment.
+  ================================================================ */
+  var LS_INITIALS = 'hecvat415_initials';
+
+  function setInitials(value, opts) {
+    EVAL_INITIALS = sanitizeInitials(value);
+    var input = document.getElementById('eval-initials');
+    if (input && input.value !== EVAL_INITIALS) input.value = EVAL_INITIALS;
+    if (!opts || opts.persist !== false) {
+      try {
+        if (EVAL_INITIALS) localStorage.setItem(LS_INITIALS, EVAL_INITIALS);
+        else localStorage.removeItem(LS_INITIALS);
+      } catch (e) { /* storage may be unavailable (private mode); non-fatal */ }
+    }
+  }
+
+  function wireInitials() {
+    var input = document.getElementById('eval-initials');
+    if (!input) return;
+    var saved;
+    try { saved = localStorage.getItem(LS_INITIALS); } catch (e) { saved = null; }
+    if (saved) setInitials(saved, { persist: false });
+    input.addEventListener('input', function () { setInitials(input.value); });
   }
 
   /* ================================================================
@@ -3735,6 +3853,7 @@ var HECVAT_SEC = (function () {
   buildSections();
   buildEvalSections();
   wireSidebarButtons();
+  wireInitials();
   refreshProgress();
 
   /* ================================================================
