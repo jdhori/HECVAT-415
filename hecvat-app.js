@@ -1,5 +1,5 @@
 /* ============================================================
-   HECVAT 4.1.5 — Application Logic
+   HECVAT 4.1.6 — Application Logic
    Depends on: hecvat-data.js  (HECVAT_QUESTIONS global)
 
    Security model
@@ -76,6 +76,17 @@ var HECVAT_SEC = (function () {
      Returns a sanitised shallow copy, or null if the record is invalid.  */
   var VALID_IMP  = {'':1,'Minor Importance':1,'Standard Importance':1,'Critical Importance':1};
   var VALID_COMP = {'':1,'Mark as Compliant':1,'Mark as Non-Compliant':1};
+  /* The four attributable analyst fields — used to bound the optional
+     per-field author map (`by`) and merge-conflict log (`conflicts`). */
+  var AE_FIELDS  = {impOverride:1, compOverride:1, nonNeg:1, analystNotes:1};
+  /* Executable-HTML guard shared by the analyst-notes and conflict-value
+     checks (same tag list as validateRecord's EXEC_TAG). */
+  var AE_EXEC_TAG = /<\s*\/?\s*(script|iframe|object|embed|form|input|button|link|meta|style|svg|math|details|dialog|template|base)[^a-z0-9]/i;
+  /* Initials sanitiser mirroring the app's sanitizeInitials: keep only
+     [A-Za-z0-9.-] (strips '=' so CSV-injection-safe) and cap at 8 chars. */
+  function sanInitials(s) {
+    return String(s == null ? '' : s).replace(/[^A-Za-z0-9.\-]/g, '').slice(0, 8);
+  }
   function validateAERecord(qid, record) {
     if (!/^[A-Z]{2,5}-\d{1,3}$/.test(qid)) return null;
     if (!record || typeof record !== 'object') return null;
@@ -101,8 +112,50 @@ var HECVAT_SEC = (function () {
       if (EXEC_TAG_AN.test(record.analystNotes)) return null;
       if (record.analystNotes) out.analystNotes = record.analystNotes;
     }
-    /* Return out only if at least one meaningful field is set */
-    return Object.keys(out).length ? out : null;
+
+    /* A record must carry at least one substantive field; `by`/`conflicts`
+       are metadata ABOUT those fields and never stand on their own. */
+    if (!Object.keys(out).length) return null;
+
+    /* Optional per-field author attribution: { field: initials }. Unknown
+       fields are ignored; each value is sanitised to safe initials. */
+    if (record.by !== undefined) {
+      if (!record.by || typeof record.by !== 'object' || Array.isArray(record.by)) return null;
+      var cleanBy = {}, byKeys = Object.keys(record.by);
+      for (var bi = 0; bi < byKeys.length; bi++) {
+        var bf = byKeys[bi];
+        if (!AE_FIELDS.hasOwnProperty(bf)) continue;
+        if (typeof record.by[bf] !== 'string') return null;
+        var ini = sanInitials(record.by[bf]);
+        if (ini) cleanBy[bf] = ini;
+      }
+      if (Object.keys(cleanBy).length) out.by = cleanBy;
+    }
+
+    /* Optional merge-conflict log: [{ field, entries:[{by,value}], resolved }].
+       Bounded and strictly validated because it arrives from untrusted files. */
+    if (record.conflicts !== undefined) {
+      if (!Array.isArray(record.conflicts) || record.conflicts.length > 64) return null;
+      var cleanConf = [];
+      for (var ci = 0; ci < record.conflicts.length; ci++) {
+        var cf = record.conflicts[ci];
+        if (!cf || typeof cf !== 'object' || Array.isArray(cf)) return null;
+        if (typeof cf.field !== 'string' || !AE_FIELDS.hasOwnProperty(cf.field)) return null;
+        if (!Array.isArray(cf.entries) || cf.entries.length < 1 || cf.entries.length > 16) return null;
+        var cleanEntries = [];
+        for (var ei = 0; ei < cf.entries.length; ei++) {
+          var en = cf.entries[ei];
+          if (!en || typeof en !== 'object') return null;
+          if (typeof en.by !== 'string' || typeof en.value !== 'string') return null;
+          if (en.value.length > 200 || AE_EXEC_TAG.test(en.value)) return null;
+          cleanEntries.push({ by: sanInitials(en.by), value: en.value });
+        }
+        cleanConf.push({ field: cf.field, entries: cleanEntries, resolved: cf.resolved === true });
+      }
+      if (cleanConf.length) out.conflicts = cleanConf;
+    }
+
+    return out;
   }
 
   /* ── Validate a loaded response record ───────────────────────── */
@@ -859,6 +912,18 @@ var HECVAT_SEC = (function () {
       ng.appendChild(ngIcon);
       ng.appendChild(txt(q.noG)); L.appendChild(ng);
     }
+    /* N/A guidance — shown only for questions where N/A is a valid answer
+       (q.naG present ⇔ the official workbook offers a Yes/No/N-A dropdown).
+       Toggled visible when the analyst selects N/A, mirroring yg/ng. */
+    if (q.naG) {
+      var nag = mk('div', 'cg nag'); nag.id = 'nag-' + q.id;
+      attr(nag, 'role', 'note'); attr(nag, 'aria-live', 'polite'); attr(nag, 'aria-hidden', 'true');
+      attr(nag, 'aria-label', 'Guidance for N/A answer on ' + q.id);
+      var nagIcon = mk('span', 'cg-icon'); attr(nagIcon, 'aria-hidden', 'true');
+      nagIcon.textContent = '—'; /* — */
+      nag.appendChild(nagIcon);
+      nag.appendChild(txt(q.naG)); L.appendChild(nag);
+    }
     row.appendChild(L);
 
     /* ── Right column: input ── */
@@ -961,6 +1026,23 @@ var HECVAT_SEC = (function () {
 
         grp.appendChild(btn);
       });
+
+      /* N/A — offered only where the official workbook allows it (q.naG present).
+         Reuses the delegated .ynb click handler and pickAnswer's existing N/A
+         path (compliance indicator + N/A-excluded scoring). */
+      if (q.naG) {
+        var btnNA = mk('button', 'ynb ynb-na');
+        btnNA.type = 'button';
+        btnNA.id   = 'yn-na-' + q.id;
+        attr(btnNA, 'aria-pressed', 'false');
+        attr(btnNA, 'data-qid', q.id);
+        attr(btnNA, 'data-val', 'N/A');
+        attr(btnNA, 'aria-label', 'N/A — ' + q.q);
+        var iconNA = mk('span'); attr(iconNA, 'aria-hidden', 'true');
+        iconNA.appendChild(txt('— N/A'));
+        btnNA.appendChild(iconNA);
+        grp.appendChild(btnNA);
+      }
 
       wrap.appendChild(grp);
       Ri.appendChild(wrap);
@@ -1170,7 +1252,7 @@ var HECVAT_SEC = (function () {
       var b = mk('button', 'btn ' + inf[1]); b.type = 'button'; b.id = inf[2]; b.textContent = inf[0]; er.appendChild(b);
     });
     var cp = mk('span', 'exp-copy');
-    cp.textContent = 'HECVAT 4.1.5 \u2014 EDUCAUSE \u00a9 2025';
+    cp.textContent = 'HECVAT 4.1.6 \u2014 EDUCAUSE \u00a9 2025';
     er.appendChild(cp); sb2.appendChild(er); sp2.appendChild(sb2); main.appendChild(sp2);
   }
 
@@ -1229,8 +1311,10 @@ var HECVAT_SEC = (function () {
     /* Conditional guidance — show/hide with aria-hidden for screen readers */
     var yg = document.getElementById('yg-' + qid);
     var ng = document.getElementById('ng-' + qid);
+    var nag = document.getElementById('nag-' + qid);
     if (yg) { yg.classList.toggle('on', val === 'Yes'); attr(yg, 'aria-hidden', val === 'Yes' ? 'false' : 'true'); }
     if (ng) { ng.classList.toggle('on', val === 'No');  attr(ng, 'aria-hidden', val === 'No'  ? 'false' : 'true'); }
+    if (nag){ nag.classList.toggle('on', val === 'N/A'); attr(nag, 'aria-hidden', val === 'N/A' ? 'false' : 'true'); }
 
     /* Compliance indicator — only show when q.comp is a scorable Yes/No.
        Questions with comp='Not scored' (or unset, or loc='Not Scored', or
@@ -1285,9 +1369,11 @@ var HECVAT_SEC = (function () {
     /* Hide guidance and compliance indicator */
     var yg = document.getElementById('yg-' + qid);
     var ng = document.getElementById('ng-' + qid);
+    var nag = document.getElementById('nag-' + qid);
     var ci = document.getElementById('ci-' + qid);
     if (yg) { yg.classList.remove('on'); attr(yg, 'aria-hidden', 'true'); }
     if (ng) { ng.classList.remove('on'); attr(ng, 'aria-hidden', 'true'); }
+    if (nag){ nag.classList.remove('on'); attr(nag, 'aria-hidden', 'true'); }
     if (ci) { ci.className = 'cind'; ci.textContent = ''; }
 
     xrefRegistry.forEach(function(x){ if(x.qid===qid) syncXrefDisplay(x.el,qid); });
@@ -1677,7 +1763,7 @@ var HECVAT_SEC = (function () {
   function exportJSON() {
     var data = {
       meta: {
-        tool: 'HECVAT', version: '4.1.5',
+        tool: 'HECVAT', version: '4.1.6',
         exported: new Date().toISOString(),
         notice: 'This file contains sensitive assessment data. Handle as confidential, transmit only over encrypted channels, and delete when no longer required.'
       },
@@ -1695,19 +1781,23 @@ var HECVAT_SEC = (function () {
          the file tight. Skip ones where every field is empty/false. */
       var ae = AE[q.id];
       if (ae && (ae.impOverride || ae.compOverride || ae.nonNeg || ae.analystNotes)) {
-        data.analystEvaluations[q.id] = {
+        var aeBlock = {
           question: q.q,
           impOverride:  ae.impOverride  || '',
           compOverride: ae.compOverride || '',
           nonNeg:       !!ae.nonNeg,
           analystNotes: ae.analystNotes || ''
         };
+        /* Per-field authorship + merge-conflict log for the by-initials views. */
+        if (ae.by && Object.keys(ae.by).length) aeBlock.by = ae.by;
+        if (ae.conflicts && ae.conflicts.length)  aeBlock.conflicts = ae.conflicts;
+        data.analystEvaluations[q.id] = aeBlock;
       }
     });
     /* Evaluator initials recorded at the end of the file; used to label this
        evaluator's comments when the export is later merged into another copy. */
     data.evaluatorInitials = sanitizeInitials(EVAL_INITIALS);
-    dl(JSON.stringify(data, null, 2), 'application/json', 'HECVAT-415-responses.json');
+    dl(JSON.stringify(data, null, 2), 'application/json', 'HECVAT-416-responses.json');
     setStatus('JSON exported \u2014 handle as confidential', 'warn');
   }
 
@@ -1726,7 +1816,8 @@ var HECVAT_SEC = (function () {
     var rows = [[
       'ID', 'Question', 'Primary Section', 'Importance', 'Response', 'Notes',
       'Compliant Response', 'Score Mapping',
-      'Importance Override', 'Compliance Override', 'Non-Negotiable', 'Analyst Notes'
+      'Importance Override', 'Compliance Override', 'Non-Negotiable', 'Analyst Notes',
+      'Set By', 'Conflicts'
     ]];
     HECVAT_QUESTIONS.forEach(function (q) {
       var r  = R[q.id]  || {};
@@ -1735,7 +1826,8 @@ var HECVAT_SEC = (function () {
         q.id, q.q, renderedIn[q.id] || q.sections[0], q.imp,
         r.value || '', r.notes || '', q.comp || '', q.score || '',
         ae.impOverride || '', ae.compOverride || '',
-        ae.nonNeg ? 'Yes' : '', ae.analystNotes || ''
+        ae.nonNeg ? 'Yes' : '', ae.analystNotes || '',
+        encodeByCSV(ae.by), summarizeConflictsCSV(ae.conflicts)
       ]);
     });
     /* Trailing metadata row carrying the evaluator's initials, parsed back on
@@ -1744,7 +1836,7 @@ var HECVAT_SEC = (function () {
     if (ini) rows.push(['# Evaluator Initials', ini]);
     dl(rows.map(function (r) {
       return r.map(safeCsvCell).join(',');
-    }).join('\n'), 'text/csv', 'HECVAT-415-responses.csv');
+    }).join('\n'), 'text/csv', 'HECVAT-416-responses.csv');
     setStatus('CSV exported \u2014 handle as confidential', 'warn');
   }
 
@@ -1883,6 +1975,7 @@ var HECVAT_SEC = (function () {
     var cmpOvCol  = headers.indexOf('compliance override');
     var nnCol     = headers.indexOf('non-negotiable');
     var anNoteCol = headers.indexOf('analyst notes');
+    var setByCol  = headers.indexOf('set by');   /* per-field authorship (optional) */
 
     if (idCol === -1 || valCol === -1) {
       throw new Error('Required columns "ID" and "Response" not found. Ensure this is a HECVAT CSV export.');
@@ -1935,6 +2028,10 @@ var HECVAT_SEC = (function () {
         if (anNoteCol > -1) {
           var an = stripInjectPrefix((cells[anNoteCol] || '').trim());
           if (an) aeEntry.analystNotes = an;
+        }
+        if (setByCol > -1) {
+          var by = decodeByCSV(stripInjectPrefix((cells[setByCol] || '').trim()));
+          if (by) aeEntry.by = by;
         }
         if (Object.keys(aeEntry).length) evaluations[qid] = aeEntry;
       }
@@ -2062,6 +2159,111 @@ var HECVAT_SEC = (function () {
       .slice(0, 8);
   }
 
+  /* Record (or clear) which evaluator last set an analyst field, keyed by
+     the current EVAL_INITIALS. `active` = the field now holds a meaningful
+     value. With no initials entered we leave the field unattributed rather
+     than stamp a blank. Clearing a field drops its attribution and prunes an
+     empty `by` map so exports stay tight. Powers the by-initials report views. */
+  function stampBy(qid, field, active) {
+    var rec = AE[qid];
+    if (!rec) return;
+    var ini = sanitizeInitials(EVAL_INITIALS);
+    if (active && ini) {
+      rec.by = rec.by || {};
+      rec.by[field] = ini;
+    } else if (rec.by) {
+      delete rec.by[field];
+      if (!Object.keys(rec.by).length) delete rec.by;
+    }
+  }
+
+  /* A field counts as "set" for conflict purposes when it holds a real value
+     (non-empty string, true, non-null) rather than a cleared/default state. */
+  function aeIsSet(v) { return v !== undefined && v !== '' && v !== false && v !== null; }
+
+  /* Conflict log: at most ONE unresolved conflict per (question, field), each
+     disagreeing evaluator's latest position stored as an entry keyed by their
+     initials. This keeps a three-way disagreement (A vs B vs C) as a single
+     conflict with three entries — not a chain of pairwise rows — and collapses
+     to nothing once everyone converges. Capped (entries ≤16, conflicts ≤64)
+     so a pathological import can't grow the log without bound. */
+  function conflictDistinctValues(conf) {
+    var seen = {};
+    conf.entries.forEach(function (e) { seen[e.value] = 1; });
+    return Object.keys(seen).length;
+  }
+  function findUnresolvedConflict(rec, field) {
+    var list = rec.conflicts || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].field === field && !list[i].resolved) return list[i];
+    }
+    return null;
+  }
+  function ensureConflict(rec, field) {
+    rec.conflicts = rec.conflicts || [];
+    var conf = findUnresolvedConflict(rec, field);
+    if (!conf) {
+      if (rec.conflicts.length >= 64) return null;
+      conf = { field: field, entries: [], resolved: false };
+      rec.conflicts.push(conf);
+    }
+    return conf;
+  }
+  function setConflictPosition(conf, by, value) {
+    by = by || ''; value = String(value);
+    for (var i = 0; i < conf.entries.length; i++) {
+      if (conf.entries[i].by === by) { conf.entries[i].value = value; return; }
+    }
+    if (conf.entries.length < 16) conf.entries.push({ by: by, value: value });
+  }
+  function pruneConflict(rec, conf) {
+    /* Everyone now agrees — no longer a conflict. */
+    if (conflictDistinctValues(conf) <= 1) {
+      var idx = rec.conflicts.indexOf(conf);
+      if (idx > -1) rec.conflicts.splice(idx, 1);
+    }
+  }
+  /* Two evaluators diverge on `field`: fold BOTH positions into the field's one
+     conflict (keyed by author, so re-imports are idempotent). */
+  function upsertConflict(rec, field, aBy, aVal, bBy, bVal) {
+    var conf = ensureConflict(rec, field);
+    if (!conf) return;
+    setConflictPosition(conf, aBy, aVal);
+    setConflictPosition(conf, bBy, bVal);
+    pruneConflict(rec, conf);
+  }
+  /* Fold a conflict carried by an already-merged imported file into ours,
+     merging its positions by author. Resolved conflicts need no reconciliation. */
+  function foldConflict(rec, c) {
+    if (c.resolved) return;
+    var conf = ensureConflict(rec, c.field);
+    if (!conf) return;
+    c.entries.forEach(function (e) { setConflictPosition(conf, e.by, e.value); });
+    pruneConflict(rec, conf);
+  }
+
+  /* CSV carries per-field authorship in a compact "Set By" column (e.g.
+     "comp:ABC; nn:JDH"); conflict logs are JSON/save-only and appear in CSV as
+     a read-only summary. Initials are re-sanitised by validateAERecord on load. */
+  var AE_BY_SHORT = { impOverride: 'imp', compOverride: 'comp', nonNeg: 'nn', analystNotes: 'notes' };
+  var AE_BY_LONG  = { imp: 'impOverride', comp: 'compOverride', nn: 'nonNeg', notes: 'analystNotes' };
+  function encodeByCSV(by) {
+    if (!by) return '';
+    return Object.keys(by).map(function (f) { return (AE_BY_SHORT[f] || f) + ':' + by[f]; }).join('; ');
+  }
+  function decodeByCSV(s) {
+    var by = {};
+    String(s || '').split(';').forEach(function (pair) {
+      var m = pair.trim().match(/^(imp|comp|nn|notes):(.+)$/);
+      if (m) by[AE_BY_LONG[m[1]]] = m[2].trim();
+    });
+    return Object.keys(by).length ? by : undefined;
+  }
+  function summarizeConflictsCSV(conf) {
+    if (!conf || !conf.length) return '';
+    return conf.length + ' (' + conf.map(function (c) { return AE_BY_SHORT[c.field] || c.field; }).join(', ') + ')';
+  }
+
   /* Prefix every non-blank line of an imported comment with the source
      file's evaluator initials, e.g. "[ABC] ...". Lines that already carry
      an attribution tag ("[XX] ") are left as-is so re-labelling and
@@ -2135,13 +2337,40 @@ var HECVAT_SEC = (function () {
         else if (current.indexOf(incoming) === -1) R[qid].notes = current + '\n' + incoming;
       }
     });
+    /* Merge analyst evaluations per-field with authorship + conflict tracking.
+       The imported value wins the ACTIVE state (preserving prior merge
+       behaviour so scores reflect the newest import), but when the two sides
+       set the same field to different values under different initials we log a
+       conflict that retains BOTH (author, value) pairs for later reconciliation
+       in the report. The incoming author is the file's own per-field `by`
+       attribution when present, else the file-level evaluator initials. */
+    var fileIni = sanitizeInitials(fileInitials);
     Object.keys(cleanAE).forEach(function (qid) {
       AE[qid] = AE[qid] || {};
-      var inc = cleanAE[qid];
-      if (inc.impOverride  !== undefined) AE[qid].impOverride  = inc.impOverride;
-      if (inc.compOverride !== undefined) AE[qid].compOverride = inc.compOverride;
-      if (inc.nonNeg       !== undefined) AE[qid].nonNeg       = inc.nonNeg;
-      if (inc.analystNotes !== undefined) AE[qid].analystNotes = inc.analystNotes;
+      var dest = AE[qid], inc = cleanAE[qid], incBy = inc.by || {};
+      ['impOverride', 'compOverride', 'nonNeg', 'analystNotes'].forEach(function (field) {
+        if (inc[field] === undefined) return;
+        var incVal = inc[field];
+        var author = incBy[field] || fileIni;
+        var curVal = dest[field];
+        var curBy  = (dest.by && dest.by[field]) || '';
+        var existing = findUnresolvedConflict(dest, field);
+        if (aeIsSet(curVal) && aeIsSet(incVal) && String(curVal) !== String(incVal) &&
+            author && curBy && author !== curBy) {
+          /* Two distinct evaluators diverge — open/extend the field's conflict. */
+          upsertConflict(dest, field, curBy, curVal, author, incVal);
+        } else if (existing && author && aeIsSet(incVal)) {
+          /* No new divergence, but this evaluator already has a position in an
+             open conflict — refresh it to their latest value and drop the
+             conflict if everyone now agrees (handles a changed-mind re-import). */
+          setConflictPosition(existing, author, incVal);
+          pruneConflict(dest, existing);
+        }
+        dest[field] = incVal;
+        if (author) { dest.by = dest.by || {}; dest.by[field] = author; }
+      });
+      /* Fold in any conflicts the imported file already carried (combined work). */
+      if (inc.conflicts) inc.conflicts.forEach(function (c) { foldConflict(dest, c); });
     });
 
     restoreUI();
@@ -2165,7 +2394,7 @@ var HECVAT_SEC = (function () {
   /* ================================================================
      EXPORT — HECVAT EXCEL (.xlsx)
      Injects the saved answers into a copy of the official EDUCAUSE
-     HECVAT 4.1.5 workbook (bundled, base64-encoded in hecvat-template.js)
+     HECVAT 4.1.6 workbook (bundled, base64-encoded in hecvat-template.js)
      so the exported file keeps EVERY native feature of the real tool:
      the Yes/No/N-A dropdowns, the hidden scoring engine, conditional
      formatting and all worksheet formulas. Only the vendor input cells
@@ -2322,7 +2551,7 @@ var HECVAT_SEC = (function () {
 
       var zipped = fflate.zipSync(files, { level: 6 });
       var today  = new Date().toISOString().slice(0, 10);
-      var fname  = 'HECVAT-415-' + today + '.xlsx';
+      var fname  = 'HECVAT-416-' + today + '.xlsx';
       var blob   = new Blob([zipped], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       var url    = URL.createObjectURL(blob);
       var a      = document.createElement('a');
@@ -2756,6 +2985,9 @@ var HECVAT_SEC = (function () {
     /* Update non-negotiable count banner */
     var nnCountEl = document.getElementById('nn-count');
     if (nnCountEl) nnCountEl.textContent = String(nnCnt);
+
+    /* Refresh the go/no-go report (verdict, KPIs, composition, attribution). */
+    renderHighRiskReport();
   }
 
   function refreshEvalScorecard(evalId) {
@@ -2850,6 +3082,274 @@ var HECVAT_SEC = (function () {
       badge.className='comp-badge '+(v===null||v===undefined?'na':ok?'ok':'bad');
       badge.textContent=!v?'--':v==='N/A'?'N/A':ok?'\u2713':'\u2717';
     });
+  }
+
+  /* ================================================================
+     HIGH-RISK GO / NO-GO REPORT
+     The verdict-first view an evaluator reads while working: is there a
+     dealbreaker, how complete is the review, and — when analysts combine
+     their work — who flagged what and where they disagree. Native DOM plus
+     plain divs (no external libs); every chart is paired with a data table
+     and colour is never the sole signal (icons + text labels, WCAG 1.4.1).
+  ================================================================ */
+  var hrFilter = 'all';   /* 'all' or a specific evaluator's initials */
+
+  var HR_STATUS_META = {
+    compliant:    { cls: 'ok',  color: '#15803d', icon: '✓', label: 'Compliant' },
+    noncompliant: { cls: 'bad', color: '#b91c1c', icon: '✗', label: 'Non-compliant' },
+    na:           { cls: 'na',  color: '#64748b', icon: '—', label: 'N/A' },
+    unanswered:   { cls: 'un',  color: '#9ca3af', icon: '○', label: 'Unanswered' }
+  };
+  var HR_FIELD_LABEL = { impOverride: 'Importance', compOverride: 'Compliance', nonNeg: 'Non-negotiable', analystNotes: 'Notes' };
+  /* Fixed attribution palette — always shown alongside the initials text so
+     colour never carries meaning alone. */
+  var HR_INI_COLORS = ['#2a78d6', '#1baf7a', '#c98500', '#9085e9', '#e24b4a', '#d55181', '#d95926', '#4a8fd4'];
+  function hrIniColor(ini, idx) { return ini === '—' ? '#9ca3af' : HR_INI_COLORS[idx % HR_INI_COLORS.length]; }
+
+  /* Effective compliance status of a scored question, applying analyst
+     overrides: compliant | noncompliant | na | unanswered. */
+  function hrStatus(q) {
+    var v = R[q.id] && R[q.id].value;
+    if (!v) return 'unanswered';
+    if (v === 'N/A') return 'na';
+    var ae = AE[q.id] || {};
+    var ok = ae.compOverride === 'Mark as Compliant' ? true
+           : ae.compOverride === 'Mark as Non-Compliant' ? false
+           : (q.comp ? v === q.comp : v === 'Yes');
+    return ok ? 'compliant' : 'noncompliant';
+  }
+
+  function computeHighRiskModel() {
+    var crit = HECVAT_QUESTIONS.filter(function (q) {
+      return q.imp === 'Critical Importance' && q.loc !== 'Not Scored';
+    });
+    var comp = 0, nc = 0, na = 0, un = 0;
+    crit.forEach(function (q) {
+      var s = hrStatus(q);
+      if (s === 'compliant') comp++; else if (s === 'noncompliant') nc++;
+      else if (s === 'na') na++; else un++;
+    });
+
+    var nnItems = HECVAT_QUESTIONS
+      .filter(function (q) { return AE[q.id] && AE[q.id].nonNeg; })
+      .map(function (q) {
+        var ae = AE[q.id] || {};
+        return { id: q.id, q: q.q, cat: q.id.slice(0, 4),
+                 status: hrStatus(q), by: (ae.by && ae.by.nonNeg) || '' };
+      });
+    var openNN = nnItems.filter(function (i) {
+      return i.status === 'noncompliant' || i.status === 'unanswered';
+    });
+
+    var conflicts = [];
+    HECVAT_QUESTIONS.forEach(function (q) {
+      var ae = AE[q.id];
+      if (!ae || !ae.conflicts) return;
+      ae.conflicts.forEach(function (c) {
+        if (!c.resolved) conflicts.push({ id: q.id, field: c.field, entries: c.entries });
+      });
+    });
+
+    var byInitials = {};
+    nnItems.forEach(function (i) { var k = i.by || '—'; byInitials[k] = (byInitials[k] || 0) + 1; });
+
+    var verdict;
+    if (openNN.length) {
+      verdict = { level: 'hold', label: 'Hold',
+        detail: openNN.length + ' unresolved non-negotiable' + (openNN.length > 1 ? 's' : '') +
+                ' — cannot recommend until remediated, reconciled, or accepted with risk' };
+    } else if (nc > 0 || un > 0 || conflicts.length) {
+      var bits = [];
+      if (nc) bits.push(nc + ' critical non-compliant');
+      if (un) bits.push(un + ' critical unanswered');
+      if (conflicts.length) bits.push(conflicts.length + ' unreconciled conflict' + (conflicts.length > 1 ? 's' : ''));
+      verdict = { level: 'review', label: 'Review', detail: bits.join(' · ') };
+    } else {
+      verdict = { level: 'clear', label: 'Clear',
+        detail: 'All critical-importance questions answered and compliant; no open non-negotiables' };
+    }
+
+    return { crit: crit, comp: comp, nc: nc, na: na, un: un,
+             nnItems: nnItems, openNN: openNN, conflicts: conflicts,
+             byInitials: byInitials, verdict: verdict };
+  }
+
+  function buildHighRiskReport() {
+    var sec = mk('div', 'hr-report'); sec.id = 'hr-report';
+    var h3 = mk('h3', 'hr-report-h'); h3.appendChild(txt('Go / no-go report')); sec.appendChild(h3);
+
+    var verdict = mk('div', 'hr-verdict'); verdict.id = 'hr-verdict';
+    attr(verdict, 'role', 'status'); attr(verdict, 'aria-live', 'polite');
+    sec.appendChild(verdict);
+
+    var kpis = mk('div', 'hr-kpis'); kpis.id = 'hr-kpis'; sec.appendChild(kpis);
+
+    var fig = mk('figure', 'hr-compose'); attr(fig, 'role', 'group'); attr(fig, 'aria-label', 'Critical-importance answer composition');
+    var cap = mk('figcaption', 'hr-sub-h'); cap.appendChild(txt('Critical-importance answer composition')); fig.appendChild(cap);
+    var bar = mk('div', 'hr-bar'); bar.id = 'hr-compose-bar'; attr(bar, 'role', 'img'); fig.appendChild(bar);
+    var legend = mk('div', 'hr-legend'); legend.id = 'hr-compose-legend'; fig.appendChild(legend);
+    var det = mk('details', 'hr-details');
+    var sum = mk('summary'); sum.appendChild(txt('Show composition as a table')); det.appendChild(sum);
+    var tblWrap = mk('div', 'hr-tblwrap'); tblWrap.id = 'hr-compose-table'; det.appendChild(tblWrap);
+    fig.appendChild(det); sec.appendChild(fig);
+
+    var attrH = mk('h4', 'hr-sub-h'); attrH.appendChild(txt('Non-negotiables by evaluator')); sec.appendChild(attrH);
+    var chips = mk('div', 'hr-chips'); chips.id = 'hr-chips';
+    attr(chips, 'role', 'group'); attr(chips, 'aria-label', 'Filter report by evaluator initials'); sec.appendChild(chips);
+    var abar = mk('div', 'hr-attrbar'); abar.id = 'hr-attrbar'; attr(abar, 'role', 'img'); sec.appendChild(abar);
+    /* Self-contained filter handling — clicking a chip re-renders the report. */
+    chips.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-hrfilter]'); if (!b) return;
+      hrFilter = b.getAttribute('data-hrfilter');
+      renderHighRiskReport();
+    });
+
+    var nnH = mk('h4', 'hr-sub-h'); nnH.id = 'hr-nntrack-h'; nnH.appendChild(txt('Non-negotiable tracker')); sec.appendChild(nnH);
+    var track = mk('div', 'hr-nntrack'); track.id = 'hr-nntrack';
+    attr(track, 'aria-live', 'polite'); attr(track, 'aria-labelledby', 'hr-nntrack-h'); sec.appendChild(track);
+
+    var cfH = mk('h4', 'hr-sub-h'); cfH.appendChild(txt('Needs reconciliation')); sec.appendChild(cfH);
+    var cf = mk('div', 'hr-conflicts'); cf.id = 'hr-conflicts'; attr(cf, 'aria-live', 'polite'); sec.appendChild(cf);
+
+    return sec;
+  }
+
+  function renderHighRiskReport() {
+    if (!document.getElementById('hr-report')) return;
+    var m = computeHighRiskModel();
+
+    /* Verdict banner */
+    var vEl = document.getElementById('hr-verdict');
+    vEl.className = 'hr-verdict lvl-' + m.verdict.level; vEl.replaceChildren();
+    var vIcon = mk('span', 'hr-verdict-icon'); attr(vIcon, 'aria-hidden', 'true');
+    vIcon.textContent = m.verdict.level === 'hold' ? '⛔' : m.verdict.level === 'review' ? '⚠' : '✓';
+    var vTxt = mk('div');
+    var vLbl = mk('div', 'hr-verdict-label'); vLbl.appendChild(txt(m.verdict.label));
+    var vDet = mk('div', 'hr-verdict-detail'); vDet.appendChild(txt(m.verdict.detail));
+    vTxt.appendChild(vLbl); vTxt.appendChild(vDet);
+    vEl.appendChild(vIcon); vEl.appendChild(vTxt);
+
+    /* KPI tiles */
+    var kpis = document.getElementById('hr-kpis'); kpis.replaceChildren();
+    var coverage = m.crit.length ? Math.round((m.crit.length - m.un) / m.crit.length * 100) : 100;
+    [
+      [m.crit.length, 'Critical questions', ''],
+      [m.nc, 'Non-compliant', m.nc ? 'bad' : 'ok'],
+      [m.nnItems.length, 'Non-negotiables', m.openNN.length ? 'bad' : ''],
+      [coverage + '%', 'Review coverage', coverage === 100 ? 'ok' : 'warn']
+    ].forEach(function (k) {
+      var t = mk('div', 'hr-kpi' + (k[2] ? ' hr-kpi-' + k[2] : ''));
+      var n = mk('div', 'hr-kpi-n'); n.appendChild(txt(String(k[0])));
+      var l = mk('div', 'hr-kpi-l'); l.appendChild(txt(k[1]));
+      t.appendChild(n); t.appendChild(l); kpis.appendChild(t);
+    });
+
+    /* Composition bar + legend + table */
+    var total = m.crit.length || 1;
+    var segs = [['compliant', m.comp], ['noncompliant', m.nc], ['na', m.na], ['unanswered', m.un]];
+    var bar = document.getElementById('hr-compose-bar'); bar.replaceChildren();
+    attr(bar, 'aria-label', 'Critical-importance composition of ' + m.crit.length + ' questions: ' +
+      m.comp + ' compliant, ' + m.nc + ' non-compliant, ' + m.na + ' not applicable, ' + m.un + ' unanswered.');
+    segs.forEach(function (s) {
+      if (!s[1]) return;
+      var meta = HR_STATUS_META[s[0]];
+      var seg = mk('div', 'hr-seg'); seg.style.width = (s[1] / total * 100) + '%'; seg.style.background = meta.color;
+      attr(seg, 'title', meta.label + ': ' + s[1]);
+      if (s[1] / total > 0.08) { var sl = mk('span', 'hr-seg-l'); sl.appendChild(txt(String(s[1]))); seg.appendChild(sl); }
+      bar.appendChild(seg);
+    });
+    var legend = document.getElementById('hr-compose-legend'); legend.replaceChildren();
+    segs.forEach(function (s) {
+      var meta = HR_STATUS_META[s[0]];
+      var li = mk('span', 'hr-legend-item');
+      var sw = mk('span', 'hr-sw'); sw.style.background = meta.color; attr(sw, 'aria-hidden', 'true');
+      li.appendChild(sw); li.appendChild(txt(meta.label + ' ' + s[1])); legend.appendChild(li);
+    });
+    var tw = document.getElementById('hr-compose-table'); tw.replaceChildren();
+    var tbl = mk('table', 'hr-table'); attr(tbl, 'aria-label', 'Critical-importance answer composition');
+    var thead = mk('thead'); var hrow = mk('tr');
+    ['Status', 'Count', 'Share'].forEach(function (h) { var th = mk('th'); attr(th, 'scope', 'col'); th.appendChild(txt(h)); hrow.appendChild(th); });
+    thead.appendChild(hrow); tbl.appendChild(thead);
+    var tb = mk('tbody');
+    segs.forEach(function (s) {
+      var meta = HR_STATUS_META[s[0]]; var tr = mk('tr');
+      var th = mk('th'); attr(th, 'scope', 'row'); th.appendChild(txt(meta.label)); tr.appendChild(th);
+      var td1 = mk('td'); td1.appendChild(txt(String(s[1]))); tr.appendChild(td1);
+      var td2 = mk('td'); td2.appendChild(txt(Math.round(s[1] / total * 100) + '%')); tr.appendChild(td2);
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb); tw.appendChild(tbl);
+
+    /* Filter chips */
+    var iniKeys = Object.keys(m.byInitials).sort();
+    if (hrFilter !== 'all' && iniKeys.indexOf(hrFilter) === -1) hrFilter = 'all';  /* filtered evaluator no longer present */
+    var chips = document.getElementById('hr-chips'); chips.replaceChildren();
+    function mkChip(val, label, count) {
+      var b = mk('button', 'hr-chip' + (hrFilter === val ? ' active' : '')); b.type = 'button';
+      attr(b, 'data-hrfilter', val); attr(b, 'aria-pressed', hrFilter === val ? 'true' : 'false');
+      b.appendChild(txt(label + (count != null ? ' (' + count + ')' : ''))); return b;
+    }
+    chips.appendChild(mkChip('all', 'All', m.nnItems.length));
+    iniKeys.forEach(function (k) { chips.appendChild(mkChip(k, k === '—' ? 'Unattributed' : k, m.byInitials[k])); });
+
+    /* Attribution bar (non-negotiables by evaluator) */
+    var abar = document.getElementById('hr-attrbar'); abar.replaceChildren();
+    var nnTotal = m.nnItems.length || 1;
+    attr(abar, 'aria-label', 'Non-negotiable flags by evaluator: ' +
+      (iniKeys.length ? iniKeys.map(function (k) { return (k === '—' ? 'unattributed' : k) + ' ' + m.byInitials[k]; }).join(', ') : 'none flagged yet') + '.');
+    if (!iniKeys.length) { var em = mk('div', 'hr-empty2'); em.appendChild(txt('No non-negotiables flagged yet.')); abar.appendChild(em); }
+    iniKeys.forEach(function (k, idx) {
+      var seg = mk('div', 'hr-seg' + (hrFilter !== 'all' && hrFilter !== k ? ' dim' : ''));
+      seg.style.width = (m.byInitials[k] / nnTotal * 100) + '%'; seg.style.background = hrIniColor(k, idx);
+      attr(seg, 'title', (k === '—' ? 'Unattributed' : k) + ': ' + m.byInitials[k]);
+      var sl = mk('span', 'hr-seg-l'); sl.appendChild(txt(k)); seg.appendChild(sl); abar.appendChild(seg);
+    });
+
+    /* Non-negotiable tracker grouped by category (respects filter) */
+    var track = document.getElementById('hr-nntrack'); track.replaceChildren();
+    var shown = m.nnItems.filter(function (i) { return hrFilter === 'all' || (i.by || '—') === hrFilter; });
+    if (!shown.length) {
+      var e2 = mk('div', 'hr-empty2');
+      e2.appendChild(txt(hrFilter === 'all' ? 'No non-negotiables flagged yet.' : 'No non-negotiables flagged by ' + hrFilter + '.'));
+      track.appendChild(e2);
+    } else {
+      var byCat = {};
+      shown.forEach(function (i) { (byCat[i.cat] = byCat[i.cat] || []).push(i); });
+      Object.keys(byCat).sort().forEach(function (cat) {
+        var grp = mk('div', 'hr-cat-grp');
+        var ch = mk('div', 'hr-cat-h'); ch.appendChild(txt((CAT_FULL[cat] || cat) + ' (' + byCat[cat].length + ')')); grp.appendChild(ch);
+        byCat[cat].forEach(function (i) {
+          var meta = HR_STATUS_META[i.status];
+          var row = mk('div', 'hr-nnrow status-' + meta.cls);
+          var badge = mk('span', 'hr-nnstatus ' + meta.cls); attr(badge, 'aria-hidden', 'true'); badge.appendChild(txt(meta.icon));
+          var idS = mk('span', 'hr-qid'); idS.appendChild(txt(i.id));
+          var st = mk('span', 'hr-nnstatus-txt'); st.appendChild(txt(meta.label));
+          var byS = mk('span', 'hr-by'); attr(byS, 'title', 'Flagged by'); byS.appendChild(txt(i.by || '—'));
+          row.appendChild(badge); row.appendChild(idS); row.appendChild(st); row.appendChild(byS);
+          row.appendChild(txt(' ' + (i.q.length > 64 ? i.q.slice(0, 64) + '…' : i.q)));
+          grp.appendChild(row);
+        });
+        track.appendChild(grp);
+      });
+    }
+
+    /* Unresolved conflicts (respects filter) */
+    var cf = document.getElementById('hr-conflicts'); cf.replaceChildren();
+    var shownCf = m.conflicts.filter(function (c) {
+      return hrFilter === 'all' || c.entries.some(function (e) { return e.by === hrFilter; });
+    });
+    if (!shownCf.length) { var e3 = mk('div', 'hr-empty2'); e3.appendChild(txt('Nothing to reconcile.')); cf.appendChild(e3); }
+    else {
+      shownCf.forEach(function (c) {
+        var row = mk('div', 'hr-cfrow');
+        var idS = mk('span', 'hr-qid'); idS.appendChild(txt(c.id)); row.appendChild(idS);
+        var fld = mk('span', 'hr-cf-field'); fld.appendChild(txt(HR_FIELD_LABEL[c.field] || c.field)); row.appendChild(fld);
+        c.entries.forEach(function (e) {
+          var pill = mk('span', 'hr-cf-pill'); pill.appendChild(txt((e.by || '—') + ': ' + e.value)); row.appendChild(pill);
+        });
+        cf.appendChild(row);
+      });
+    }
   }
 
   /* ================================================================
@@ -3727,6 +4227,7 @@ var HECVAT_SEC = (function () {
 
         body.appendChild(mkScorecardTable('high-risk','High-Risk Evaluation Report'));
         body.appendChild(buildHighRiskLists());
+        body.appendChild(buildHighRiskReport());
       }
 
       /* ── PRIVACY ANALYST EVALUATION ── */
@@ -3755,6 +4256,7 @@ var HECVAT_SEC = (function () {
       AE[qid] = AE[qid] || {};
       if (field === 'nonNeg') {
         AE[qid].nonNeg = e.target.checked;
+        stampBy(qid, 'nonNeg', e.target.checked);
         EVAL_SECS.forEach(function(es) {
           var row = document.getElementById('arow-'+es.id+'-'+qid);
           if (row) row.classList.toggle('non-neg', e.target.checked);
@@ -3767,6 +4269,7 @@ var HECVAT_SEC = (function () {
         refreshHighRiskLists();
       } else {
         AE[qid][field] = e.target.value;
+        stampBy(qid, field, !!e.target.value);
         e.target.classList.toggle('override-set', !!e.target.value);
         /* Announce override change to screen readers */
         EVAL_SECS.forEach(function(es) {

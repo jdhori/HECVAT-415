@@ -1,4 +1,4 @@
-# HECVAT 4.1.5 — Web Form
+# HECVAT 4.1.6 — Web Form
 
 **Higher Education Community Vendor Assessment Toolkit**
 *Solution Provider Response Tool — EDUCAUSE © 2025*
@@ -10,15 +10,15 @@
 ```
 HECVAT-415/
 ├── index.html         — Open this file in your browser to use the form
-├── hecvat-data.js     — Question data (332 questions from HECVAT 4.1.5 xlsx)
+├── hecvat-data.js     — Question data (332 questions from HECVAT 4.1.6 xlsx)
 ├── hecvat-app.js      — Application logic
 ├── hecvat.css         — Stylesheet
 ├── hecvat-worker.js   — Web Worker for isolated XLSX import parsing
 ├── xlsx.mini.min.js   — SheetJS library (loaded by the worker)
 ├── fflate.min.js      — Local zip read/write (used by the XLSX export)
-├── hecvat-template.js — Base64 of the official HECVAT 4.1.5 workbook, loaded
+├── hecvat-template.js — Base64 of the official HECVAT 4.1.6 workbook, loaded
 │                        on demand to power the vendor Excel export
-└── HECVAT415.xlsx     — Source workbook, kept only to regenerate the template
+└── HECVAT416.xlsx     — Source workbook, kept only to regenerate the template
                          (not loaded at runtime)
 ```
 
@@ -26,7 +26,7 @@ The runtime files must stay in the **same folder**. The HTML file references
 the others by relative path, and `hecvat-worker.js` loads `xlsx.mini.min.js`
 via `importScripts`, so moving any of them apart will break the tool.
 `hecvat-template.js` is loaded lazily the first time you export to Excel, so
-page load stays light. `HECVAT415.xlsx` is kept in the repo only as the source
+page load stays light. `HECVAT416.xlsx` is kept in the repo only as the source
 for regenerating `hecvat-template.js`; it is never fetched by the running tool.
 
 ---
@@ -316,7 +316,7 @@ responses and want to ensure no assessment data remains in the browser.
 The export formats are split by audience:
 
 - **Excel (`.xlsx`) is for vendors.** It produces a fully working copy of the
-  official EDUCAUSE HECVAT 4.1.5 workbook with your answers filled in — the one
+  official EDUCAUSE HECVAT 4.1.6 workbook with your answers filled in — the one
   a vendor shares with the institutions assessing them.
 - **JSON and CSV are for evaluators.** They round-trip both vendor responses
   and analyst overrides, carry the evaluator's initials, and can be merged
@@ -330,7 +330,7 @@ Exports a structured `.json` file containing:
 {
   "meta": {
     "tool": "HECVAT",
-    "version": "4.1.5",
+    "version": "4.1.6",
     "exported": "2025-04-07T12:00:00.000Z",
     "notice": "This file contains sensitive assessment data..."
   },
@@ -376,7 +376,7 @@ reviewers. Re-importing the CSV restores both responses and overrides.
 ### Export Excel (for vendors)
 
 **Export XLSX** produces a completed copy of the **official EDUCAUSE HECVAT
-4.1.5 workbook** — not a stripped-down rebuild. The tool starts from the real
+4.1.6 workbook** — not a stripped-down rebuild. The tool starts from the real
 workbook bundled with this app and injects only your answers into the vendor
 answer cells, leaving everything else untouched:
 
@@ -545,7 +545,7 @@ vendors and cloud service providers.
 - HECVAT documentation and tutorials: [educause.edu/HECVAT](https://educause.edu/HECVAT)
 - HECVAT Users Community Group: [educause.edu community](https://educause.edu)
 
-This web form is an **unofficial implementation** of the HECVAT 4.1.5
+This web form is an **unofficial implementation** of the HECVAT 4.1.6
 questionnaire for digital-first completion. It is not affiliated with or
 endorsed by EDUCAUSE. Always refer to the official HECVAT documentation for
 authoritative guidance on question interpretation and submission requirements.
@@ -588,7 +588,7 @@ Every server configuration sets these headers:
 
 ### Deployment on Netlify or Cloudflare Pages
 
-1. Copy the runtime tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`, `hecvat-worker.js`, `xlsx.mini.min.js`, `fflate.min.js`, `hecvat-template.js`) and the `_headers` file into your repository root. (`HECVAT415.xlsx` is source-only and does not need to be deployed.)
+1. Copy the runtime tool files (`index.html`, `hecvat-app.js`, `hecvat-data.js`, `hecvat.css`, `hecvat-worker.js`, `xlsx.mini.min.js`, `fflate.min.js`, `hecvat-template.js`) and the `_headers` file into your repository root. (`HECVAT416.xlsx` is source-only and does not need to be deployed.)
 2. Set your publish directory to the repository root.
 3. Deploy. Both platforms automatically apply the `_headers` file.
 

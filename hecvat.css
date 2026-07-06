@@ -1,5 +1,5 @@
 /* ============================================================
-   HECVAT 4.1.5 — Web Form Stylesheet
+   HECVAT 4.1.6 — Web Form Stylesheet
    ============================================================ */
 
 :root {
@@ -752,6 +752,7 @@ main { min-width: 0; }
 .cg { font-size: .72rem; padding: .32rem .58rem; border-radius: 3px; margin-top: .28rem; display: none; line-height: 1.4; }
 .cg.yg  { background: var(--green-bg); border-left: 3px solid var(--green); color: var(--green); }
 .cg.ng  { background: var(--red-bg);   border-left: 3px solid var(--red);   color: var(--red); }
+.cg.nag { background: #eef2f6;         border-left: 3px solid #64748b;      color: #334155; }
 .cg.on  { display: block; }
 .cg-icon {
   display: inline-flex;
@@ -764,6 +765,7 @@ main { min-width: 0; }
 }
 .cg.yg .cg-icon { color: var(--green); }
 .cg.ng .cg-icon { color: var(--red); }
+.cg.nag .cg-icon { color: #64748b; }
 .qguide .cg-icon { color: var(--navy2); }
 
 /* ── Inputs ── */
@@ -861,10 +863,16 @@ textarea { resize: vertical; min-height: 70px; }
 .ynb-yes:hover,
 .ynb-no:hover { background: #fde68a; }  /* amber-200 */
 
+/* N/A — neutral slate so it reads as "not applicable", visually distinct
+   from the amber "awaiting answer" Yes/No pair. */
+.ynb-na { background: #eef2f6; border-color: #64748b; color: #334155; } /* slate-100 / 500 / 700 */
+.ynb-na:hover { background: #e2e8f0; } /* slate-200 */
+
 /* Selected state — solid saturated box, bold white text, heavy ring.
    !important ensures no theme or override specificity dulls the state. */
 .ynb.sel-y,
-.ynb.sel-n {
+.ynb.sel-n,
+.ynb.sel-na {
   color: #ffffff !important;
   font-weight: 800 !important;
   border-width: 3px !important;
@@ -873,12 +881,15 @@ textarea { resize: vertical; min-height: 70px; }
 }
 .ynb.sel-y { background: #15803d !important; border-color: #0b5a2a !important; }
 .ynb.sel-n { background: #b91c1c !important; border-color: #7f1414 !important; }
+.ynb.sel-na { background: #475569 !important; border-color: #334155 !important; } /* slate-600 / 700 */
 /* Inner icon span — make sure it picks up white too */
 .ynb.sel-y > *,
-.ynb.sel-n > * { color: #ffffff !important; }
+.ynb.sel-n > *,
+.ynb.sel-na > * { color: #ffffff !important; }
 /* Selected marker pip in the top-right corner for extra clarity */
 .ynb.sel-y::after,
-.ynb.sel-n::after {
+.ynb.sel-n::after,
+.ynb.sel-na::after {
   content: "\2713";
   position: absolute;
   top: 2px;
@@ -1277,6 +1288,81 @@ textarea { resize: vertical; min-height: 70px; }
 .hr-nn-item  { background:var(--red-bg); }
 .hr-lists    { display:grid; grid-template-columns:1fr 1fr; gap:1rem; padding:0 1.5rem 1rem; }
 
+/* ================================================================
+   HIGH-RISK GO / NO-GO REPORT
+   Segment/attribution colours are set inline from JS (status + initials
+   palettes); the rules below own layout, typography, and theming only.
+================================================================ */
+.hr-report      { padding:0 1.5rem 1.5rem; }
+.hr-report-h    { font-size:.92rem; font-weight:700; color:var(--text); margin:.4rem 0 .7rem; }
+.hr-sub-h       { font-size:.78rem; font-weight:700; color:var(--text2); margin:1.1rem 0 .5rem; text-transform:uppercase; letter-spacing:.05em; }
+
+/* Verdict banner */
+.hr-verdict     { display:flex; align-items:center; gap:.75rem; padding:.8rem 1rem; border-radius:8px; border-left:5px solid var(--g3); background:var(--g1); margin-bottom:1rem; }
+.hr-verdict-icon{ font-size:1.6rem; line-height:1; flex-shrink:0; }
+.hr-verdict-label{ font-size:1.05rem; font-weight:800; }
+.hr-verdict-detail{ font-size:.78rem; color:var(--text2); margin-top:.15rem; }
+.hr-verdict.lvl-hold   { background:var(--red-bg);   border-left-color:var(--red);   }
+.hr-verdict.lvl-hold   .hr-verdict-label,.hr-verdict.lvl-hold   .hr-verdict-icon { color:var(--red); }
+.hr-verdict.lvl-review { background:var(--amber-bg); border-left-color:var(--amber); }
+.hr-verdict.lvl-review .hr-verdict-label,.hr-verdict.lvl-review .hr-verdict-icon { color:var(--amber); }
+.hr-verdict.lvl-clear  { background:var(--green-bg); border-left-color:var(--green); }
+.hr-verdict.lvl-clear  .hr-verdict-label,.hr-verdict.lvl-clear  .hr-verdict-icon { color:var(--green); }
+
+/* KPI tiles */
+.hr-kpis        { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.6rem; margin-bottom:1.1rem; }
+.hr-kpi         { background:var(--g1); border-radius:8px; padding:.65rem .8rem; border:1px solid var(--g2); }
+.hr-kpi-n       { font-size:1.5rem; font-weight:800; color:var(--text); line-height:1.1; }
+.hr-kpi-l       { font-size:.7rem; color:var(--g4); margin-top:.1rem; }
+.hr-kpi-ok   .hr-kpi-n { color:var(--green); }
+.hr-kpi-bad  .hr-kpi-n { color:var(--red); }
+.hr-kpi-warn .hr-kpi-n { color:var(--amber); }
+
+/* Stacked bars (composition + attribution) */
+.hr-bar,.hr-attrbar { display:flex; height:26px; border-radius:5px; overflow:hidden; background:var(--g2); gap:2px; }
+.hr-attrbar     { margin-bottom:.3rem; }
+.hr-seg         { display:flex; align-items:center; justify-content:center; min-width:0; }
+.hr-seg.dim     { opacity:.3; }
+.hr-seg-l       { font-size:.7rem; font-weight:800; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.55); padding:0 .2rem; white-space:nowrap; }
+.hr-legend      { display:flex; flex-wrap:wrap; gap:.4rem .9rem; margin:.45rem 0 .2rem; font-size:.72rem; color:var(--text2); }
+.hr-legend-item { display:inline-flex; align-items:center; gap:.3rem; }
+.hr-sw          { width:11px; height:11px; border-radius:2px; flex-shrink:0; }
+.hr-compose     { margin:0 0 .4rem; }
+
+/* Data table (inside <details>) */
+.hr-details     { margin-top:.4rem; font-size:.75rem; }
+.hr-details summary { cursor:pointer; color:var(--navy2); font-weight:600; }
+.hr-table       { width:100%; border-collapse:collapse; margin-top:.5rem; font-size:.75rem; }
+.hr-table th,.hr-table td { border:1px solid var(--g2); padding:.28rem .5rem; text-align:left; }
+.hr-table thead th { background:var(--g1); }
+
+/* Filter chips */
+.hr-chips       { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.55rem; }
+.hr-chip        { font-size:.73rem; font-weight:600; padding:.28rem .7rem; border-radius:16px; border:1.5px solid var(--g3); background:var(--white); color:var(--text2); cursor:pointer; }
+.hr-chip:hover  { border-color:var(--navy2); }
+.hr-chip.active { background:var(--navy); border-color:var(--navy); color:#fff; }
+
+/* Non-negotiable tracker */
+.hr-nntrack     { display:flex; flex-direction:column; gap:.7rem; }
+.hr-cat-grp     { border:1px solid var(--g2); border-radius:6px; overflow:hidden; }
+.hr-cat-h       { background:var(--g1); padding:.35rem .7rem; font-size:.74rem; font-weight:700; color:var(--text2); }
+.hr-nnrow       { display:flex; align-items:baseline; gap:.4rem; padding:.4rem .7rem; font-size:.78rem; border-top:1px solid var(--g1); }
+.hr-nnstatus    { font-weight:800; flex-shrink:0; }
+.hr-nnstatus.ok { color:var(--green); } .hr-nnstatus.bad{ color:var(--red); }
+.hr-nnstatus.na { color:#64748b; }      .hr-nnstatus.un { color:var(--g4); }
+.hr-nnrow.status-bad,.hr-nnrow.status-un { background:var(--red-bg); }
+.hr-nnstatus-txt{ font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--g4); flex-shrink:0; }
+.hr-by          { font-size:.7rem; font-weight:700; color:var(--navy2); background:var(--g1); border-radius:10px; padding:.02rem .4rem; flex-shrink:0; }
+
+/* Conflicts */
+.hr-conflicts   { display:flex; flex-direction:column; gap:.45rem; }
+.hr-cfrow       { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem; padding:.45rem .7rem; font-size:.77rem; background:var(--amber-bg); border:1px solid var(--amber); border-radius:6px; }
+.hr-cf-field    { font-size:.68rem; font-weight:700; text-transform:uppercase; color:var(--amber); }
+.hr-cf-pill     { font-size:.72rem; background:var(--white); border:1px solid var(--g3); border-radius:12px; padding:.05rem .5rem; }
+.hr-empty2      { padding:.6rem .2rem; font-size:.78rem; color:var(--g4); font-style:italic; }
+
+@media (prefers-reduced-motion: reduce) { .hr-chip,.hr-seg { transition:none; } }
+
 /* ── Analyst evaluation nav (replaces inline styles on snav-eval) ── */
 .snav-eval   { margin-top:.5rem; }
 .snav-hd-eval { background:#1e3a5f; }
@@ -1613,6 +1699,8 @@ h2.snav-hd-eval { background: #1e3a5f; }
 [data-theme="dark"] .ynb-no          { background: #3a2a08; border-color: #d97706; color: #fbbf24; }
 [data-theme="dark"] .ynb-yes:hover,
 [data-theme="dark"] .ynb-no:hover    { background: #4a360a; }
+[data-theme="dark"] .ynb-na          { background: #1e2630; border-color: #64748b; color: #cbd5e1; }
+[data-theme="dark"] .ynb-na:hover    { background: #28323f; }
 
 /* Dark-mode compliance pop-ups: brighter fills, matching the button
    selected state so the association holds across themes. */
@@ -1622,10 +1710,13 @@ h2.snav-hd-eval { background: #1e3a5f; }
 /* Selected state — bright solid boxes, visible on dark bg */
 [data-theme="dark"] .ynb.sel-y { background: #1ea555 !important; border-color: #0f5a2b !important; color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-n { background: #e04040 !important; border-color: #7a1313 !important; color: #ffffff !important; }
+[data-theme="dark"] .ynb.sel-na { background: #64748b !important; border-color: #475569 !important; color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-y > *,
-[data-theme="dark"] .ynb.sel-n > * { color: #ffffff !important; }
+[data-theme="dark"] .ynb.sel-n > *,
+[data-theme="dark"] .ynb.sel-na > * { color: #ffffff !important; }
 [data-theme="dark"] .ynb.sel-y::after,
-[data-theme="dark"] .ynb.sel-n::after { color: #ffffff; opacity: .95; }
+[data-theme="dark"] .ynb.sel-n::after,
+[data-theme="dark"] .ynb.sel-na::after { color: #ffffff; opacity: .95; }
 
 /* Analyst selects */
 [data-theme="dark"] .analyst-select {
@@ -1641,6 +1732,7 @@ h2.snav-hd-eval { background: #1e3a5f; }
 /* Guide / guidance banners */
 [data-theme="dark"] .cg.yg  { background: var(--green-bg); border-left-color: var(--green); }
 [data-theme="dark"] .cg.ng  { background: var(--red-bg);   border-left-color: var(--red);   }
+[data-theme="dark"] .cg.nag { background: #1a2230;         border-left-color: #64748b;      color: #cbd5e1; }
 
 /* Eval scorecard */
 [data-theme="dark"] .eval-scorecard  { background: var(--white); border-color: var(--g2); }
