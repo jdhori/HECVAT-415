@@ -2181,24 +2181,65 @@ var HECVAT_SEC = (function () {
      (non-empty string, true, non-null) rather than a cleared/default state. */
   function aeIsSet(v) { return v !== undefined && v !== '' && v !== false && v !== null; }
 
-  /* Append a conflict to a record, de-duplicated by field + the unordered set
-     of (author=value) entries, and capped so a pathological import can't grow
-     the log without bound (validateAERecord enforces the same 64 ceiling). */
-  function conflictSig(c) {
-    return c.field + '::' + c.entries.map(function (e) { return e.by + '=' + e.value; }).sort().join('~');
+  /* Conflict log: at most ONE unresolved conflict per (question, field), each
+     disagreeing evaluator's latest position stored as an entry keyed by their
+     initials. This keeps a three-way disagreement (A vs B vs C) as a single
+     conflict with three entries — not a chain of pairwise rows — and collapses
+     to nothing once everyone converges. Capped (entries ≤16, conflicts ≤64)
+     so a pathological import can't grow the log without bound. */
+  function conflictDistinctValues(conf) {
+    var seen = {};
+    conf.entries.forEach(function (e) { seen[e.value] = 1; });
+    return Object.keys(seen).length;
   }
-  function mergeConflict(rec, c) {
+  function findUnresolvedConflict(rec, field) {
+    var list = rec.conflicts || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].field === field && !list[i].resolved) return list[i];
+    }
+    return null;
+  }
+  function ensureConflict(rec, field) {
     rec.conflicts = rec.conflicts || [];
-    if (rec.conflicts.length >= 64) return;
-    var s = conflictSig(c);
-    if (!rec.conflicts.some(function (x) { return conflictSig(x) === s; })) rec.conflicts.push(c);
+    var conf = findUnresolvedConflict(rec, field);
+    if (!conf) {
+      if (rec.conflicts.length >= 64) return null;
+      conf = { field: field, entries: [], resolved: false };
+      rec.conflicts.push(conf);
+    }
+    return conf;
   }
-  function pushConflict(rec, field, aBy, aVal, bBy, bVal) {
-    mergeConflict(rec, {
-      field: field,
-      entries: [{ by: aBy || '', value: String(aVal) }, { by: bBy || '', value: String(bVal) }],
-      resolved: false
-    });
+  function setConflictPosition(conf, by, value) {
+    by = by || ''; value = String(value);
+    for (var i = 0; i < conf.entries.length; i++) {
+      if (conf.entries[i].by === by) { conf.entries[i].value = value; return; }
+    }
+    if (conf.entries.length < 16) conf.entries.push({ by: by, value: value });
+  }
+  function pruneConflict(rec, conf) {
+    /* Everyone now agrees — no longer a conflict. */
+    if (conflictDistinctValues(conf) <= 1) {
+      var idx = rec.conflicts.indexOf(conf);
+      if (idx > -1) rec.conflicts.splice(idx, 1);
+    }
+  }
+  /* Two evaluators diverge on `field`: fold BOTH positions into the field's one
+     conflict (keyed by author, so re-imports are idempotent). */
+  function upsertConflict(rec, field, aBy, aVal, bBy, bVal) {
+    var conf = ensureConflict(rec, field);
+    if (!conf) return;
+    setConflictPosition(conf, aBy, aVal);
+    setConflictPosition(conf, bBy, bVal);
+    pruneConflict(rec, conf);
+  }
+  /* Fold a conflict carried by an already-merged imported file into ours,
+     merging its positions by author. Resolved conflicts need no reconciliation. */
+  function foldConflict(rec, c) {
+    if (c.resolved) return;
+    var conf = ensureConflict(rec, c.field);
+    if (!conf) return;
+    c.entries.forEach(function (e) { setConflictPosition(conf, e.by, e.value); });
+    pruneConflict(rec, conf);
   }
 
   /* CSV carries per-field authorship in a compact "Set By" column (e.g.
@@ -2313,15 +2354,23 @@ var HECVAT_SEC = (function () {
         var author = incBy[field] || fileIni;
         var curVal = dest[field];
         var curBy  = (dest.by && dest.by[field]) || '';
+        var existing = findUnresolvedConflict(dest, field);
         if (aeIsSet(curVal) && aeIsSet(incVal) && String(curVal) !== String(incVal) &&
             author && curBy && author !== curBy) {
-          pushConflict(dest, field, curBy, curVal, author, incVal);
+          /* Two distinct evaluators diverge — open/extend the field's conflict. */
+          upsertConflict(dest, field, curBy, curVal, author, incVal);
+        } else if (existing && author && aeIsSet(incVal)) {
+          /* No new divergence, but this evaluator already has a position in an
+             open conflict — refresh it to their latest value and drop the
+             conflict if everyone now agrees (handles a changed-mind re-import). */
+          setConflictPosition(existing, author, incVal);
+          pruneConflict(dest, existing);
         }
         dest[field] = incVal;
         if (author) { dest.by = dest.by || {}; dest.by[field] = author; }
       });
       /* Fold in any conflicts the imported file already carried (combined work). */
-      if (inc.conflicts) inc.conflicts.forEach(function (c) { mergeConflict(dest, c); });
+      if (inc.conflicts) inc.conflicts.forEach(function (c) { foldConflict(dest, c); });
     });
 
     restoreUI();
