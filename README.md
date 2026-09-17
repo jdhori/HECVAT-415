@@ -8,7 +8,7 @@
 ## Contents of this ZIP
 
 ```
-HECVAT-415/
+HECVAT-416/
 ├── index.html         — Open this file in your browser to use the form
 ├── hecvat-data.js     — Question data (332 questions from HECVAT 4.1.6 xlsx)
 ├── hecvat-app.js      — Application logic
@@ -220,6 +220,77 @@ is a vendor-facing deliverable (see *Export Excel (for vendors)* below). Keep
 analyst overrides in the JSON/CSV exports, which are the evaluator-facing
 formats.
 
+### Radar Graphs — Vendor vs Evaluator Scores, and High-Risk Coverage
+
+All three analyst tabs carry a collapsible **📡 Radar Graph** panel directly
+under the scorecard, rendered as native SVG inside the tool's CSP.
+
+| Tab | Spokes | Dashed outline (square markers) | Solid outline (round markers) |
+|---|---|---|---|
+| Institution Evaluation | COMP → ITAC plus the AI and Privacy aggregates | Vendor self-reported score % | Evaluator-adjusted score % |
+| Privacy Analyst Evaluation | The ten privacy categories | Vendor self-reported score % | Evaluator-adjusted score % |
+| High-Risk Evaluation | Same sections as Institution Evaluation | Score % on that section's **Critical Importance** questions | Score % on the questions flagged **Non-Negotiable** |
+
+Scoring follows the workbook: Critical = 20 pts, Standard = 10, Minor = 5; a
+question earns its points only when the answer matches the expected compliant
+answer (some privacy questions expect **No**); N/A removes a question from the
+total; a blank answer stays in the total and earns nothing. A spoke shows a
+hollow marker at the hub when a section has no scorable data, so a real 0 %
+never looks like a missing score.
+
+**Failed non-negotiables are flagged on every radar.** Any section containing
+a Non-Negotiable question that is non-compliant gets a thick red spoke, a red
+`!` badge at the rim, a red label, and a sentence in the graph's screen-reader
+description. The data table lists the failing question IDs.
+
+When overrides carry evaluator initials, a row of chips restricts the
+evaluator outline (and the non-negotiable flags) to one reviewer, so a lead
+analyst can compare how each evaluator graded. **View data as table** lists,
+per section: questions, answered / N/A / blank counts, each series' score, the
+difference, override count, analyst-note count, vendor-note count, and
+non-negotiables flagged and failed.
+
+**Group import for leadership.** **Import JSON** accepts several files at
+once. Each evaluator exports their own JSON; a lead picks all of them in one
+go and the tool merges them, keeping per-field authorship and logging
+conflicts, so the radar chips and the go/no-go report show every reviewer.
+
+**Radar data in exports.** The JSON export carries a `radar` block (every tab,
+for all evaluators combined and for each evaluator) and the CSV export ends
+with `# Radar` rows holding the same figures. Both are informational: the
+importer ignores them and recomputes from the merged answers and overrides.
+
+**Vendor explanations on the chart.** A section whose vendor added notes to
+at least one question gets a small solid dot inside its dashed marker, so a
+low score backed by written justification reads differently from a bare one.
+The data table's **Vendor notes** column gives the count per section.
+
+### Failed non-negotiables — vendor justification vs evaluator notes
+
+Under the High-Risk radar sits a drill-down listing every Non-Negotiable
+question that is currently non-compliant. Each entry shows the question, the
+initials of whoever flagged it, and two columns side by side:
+
+| Column | Contents |
+|---|---|
+| Vendor | The answer given, the answer the workbook expects, and the vendor's own note explaining it (or a note that no explanation was given) |
+| Evaluator | The analyst note, the initials of who wrote it, and any Compliance Override applied |
+
+This puts the vendor's justification in front of the reviewer at the moment
+of judgement rather than three clicks away. The list follows the radar's
+evaluator chips, so filtering to one reviewer shows only their flags.
+
+### Appendix — Vendor notes by section
+
+Every evaluation tab ends with a collapsible **Appendix — Vendor notes by
+section**, listing each question the vendor annotated, grouped by report
+section, with the question ID, the answer given, the question text, and the
+full note. The badge on the toggle counts the notes in scope for that tab.
+
+The appendix is collapsed on screen and **always expanded when printing**,
+starting on a fresh page, so a printed or PDF-exported evaluation carries the
+vendor's own words as a reference section at the back.
+
 ### Compliance Plots
 
 Inside **Institution Evaluation** is a collapsible
@@ -268,11 +339,16 @@ sync with vendor answers and analyst overrides.
 
 ---
 
-## Saving and Loading Progress
+## Snapshots
 
-### Save Progress
+### Take Snapshot
 
-Click **Save Progress** in the left sidebar. Your responses **and any
+A **snapshot** is a safety net for the browser tab you are working in.
+It brings your work back after an accidental reload, a crash, or navigating
+away. It is deliberately **not** called a save, because it does not outlive the
+browser. **Export JSON** is the copy you keep.
+
+Click **Take Snapshot** in the left sidebar. Your responses **and any
 analyst overrides** (Importance Override, Compliance Override,
 Non-Negotiable flag, Analyst Notes set in the Institution Evaluation /
 Privacy Analyst Evaluation tabs) are encrypted together using
@@ -282,8 +358,8 @@ Privacy Analyst Evaluation tabs) are encrypted together using
 
 - The stored data is ciphertext — unreadable without the session key
 - Closing the tab discards the session key; you will not be able to reload
-  that specific save in a new tab or session
-- Legacy saves that predate the analyst-evaluation bundle still load; the
+  that specific snapshot in a new tab or session
+- Legacy snapshots that predate the analyst-evaluation bundle still load; the
   analyst overrides start empty and can be added fresh
 
 > **Important:** Because the session key is tab-scoped, always **Export JSON**
@@ -291,14 +367,29 @@ Privacy Analyst Evaluation tabs) are encrypted together using
 > contains your plaintext responses and can be re-imported in a future session
 > (manual re-entry required — JSON is for archiving, not automatic re-import).
 
-### Load Progress
+The tool now says this in the interface rather than leaving it to the manual.
+The first snapshot of each browser session raises a prominent banner explaining
+that it cannot be opened once the browser closes, and every later snapshot
+repeats a one-line reminder. If you try to **Restore Snapshot** against a
+snapshot from an earlier session, the banner explains plainly that the key is gone
+by design, that the copy cannot be recovered by anyone, and that **Import
+JSON** is the way back. Both banners use `role="alert"`, so screen readers
+interrupt with them instead of queuing them behind other messages, and neither
+disappears on a timer.
 
-Click **Load Progress** to decrypt and restore a previously saved session from
-the current tab's `localStorage`. Every loaded record is validated before
+### Restore Snapshot
+
+Click **Restore Snapshot** to decrypt and restore the snapshot taken earlier in
+this tab.
+
+You rarely need to click it: when the page loads and a usable snapshot is
+waiting, the tool says so and offers a **Restore snapshot** button. If the
+snapshot was taken in an earlier browser session it explains that instead, so a
+blank form is never left unexplained. Every loaded record is validated before
 being applied — records that don't match the expected structure are discarded
 and counted in a status message.
 
-**Note:** Saves created by older unencrypted versions of this tool are
+**Note:** Snapshots created by older unencrypted versions of this tool are
 rejected on load as a security measure. Use **Clear & Reset** and start fresh
 if you encounter this message.
 
@@ -375,7 +466,7 @@ reviewers. Re-importing the CSV restores both responses and overrides.
 
 ### Export Excel (for vendors)
 
-**Export XLSX** produces a completed copy of the **official EDUCAUSE HECVAT
+**Export HECVAT** (Excel) produces a completed copy of the **official EDUCAUSE HECVAT
 4.1.6 workbook** — not a stripped-down rebuild. The tool starts from the real
 workbook bundled with this app and injects only your answers into the vendor
 answer cells, leaving everything else untouched:
@@ -396,14 +487,13 @@ instead of having to transcribe answers by hand. Analyst-only fields are *not*
 written to this file; it is purely the vendor's response document.
 
 > Because the export is the official workbook, it round-trips back through
-> **Import XLSX**, and opens in Excel, LibreOffice, and Google Sheets with the
+> **Import HECVAT** (Excel), and opens in Excel, LibreOffice, and Google Sheets with the
 > scoring intact.
 
 ### Evaluator initials
 
-The header has an **Evaluator initials** field. Enter your initials once and
-they are remembered in this browser (and folded into your encrypted save).
-Initials make evaluator hand-offs traceable:
+The header has an **Evaluator initials** field. Initials make evaluator
+hand-offs traceable:
 
 - They are written at the **end of the JSON and CSV exports** (a top-level
   `evaluatorInitials` key in JSON; a trailing `# Evaluator Initials` row in
@@ -412,12 +502,38 @@ Initials make evaluator hand-offs traceable:
   comment that file contributes is **prefixed with that file's initials**
   (e.g. `[JD] Needs MFA before launch`), so you can see who said what.
 
-Initials are an evaluator convenience and are intentionally **not** written
-into the vendor Excel export.
+Initials are intentionally **not** written into the vendor Excel export.
+
+**Where initials are stored.** Your initials identify the person who made a
+given judgement about a named vendor, so they are treated as confidential and
+kept only in memory for the session and inside the **encrypted** save envelope
+alongside the judgements themselves. They are deliberately not written to
+browser storage in the clear, because recording *who assessed whom* in plain
+text while encrypting the findings would defeat the point.
+
+Practical consequence: **initials do not survive a page reload on their own.**
+Use **Take Snapshot** to persist them, and **Restore Snapshot** to bring them
+back. If an earlier version of this tool left a plaintext copy in your
+browser, it is adopted once on first load and then deleted from disk.
+
+### Import limits
+
+Imported files come from vendors and are treated as untrusted. Three limits
+apply to **every** import format:
+
+| Limit | Value | Why |
+|---|---|---|
+| File size | 20 MB | Blocks zip bombs and oversized payloads |
+| Files per group import | 25 | A review team, not a crowd |
+| Records per file | 2,000 | The real form has 332 questions |
+
+The record limit is the one that matters most: it bounds the validation work
+before any of it runs, so a small file claiming tens of thousands of records
+cannot lock up the page. A genuine assessment is never near any of these.
 
 ### Importing & merging
 
-**Import JSON**, **Import CSV**, and **Import XLSX** bring answers back into the
+**Import JSON**, **Import CSV**, and **Import HECVAT** (Excel) bring answers back into the
 form. Imports **merge** — they never silently overwrite your work:
 
 - A non-empty answer in the file fills in or updates the matching question; a
@@ -437,7 +553,17 @@ without losing their own annotations.
 
 Opens the browser print dialog. The sidebar, score banner, and navigation
 controls are hidden in print view, and all sections are expanded for a clean
-multi-page output.
+multi-page output, including the vendor-notes appendix, which starts on a
+fresh page.
+
+**Printing an analyst tab is not vendor-safe.** Printing shows whichever
+section is on screen and expands everything inside it, so printing from an
+analyst evaluation tab puts importance overrides, compliance overrides,
+non-negotiable flags, and analyst notes on the page. Those tabs therefore
+print with a red **INTERNAL — ANALYST USE ONLY. DO NOT SEND TO THE VENDOR.**
+banner at the top of the output. It appears only in print, never on screen.
+To produce a copy for the vendor, print from a vendor response section or use
+**Export HECVAT** instead.
 
 > **Security reminder:** Exported files are **plaintext**. Treat them as
 > confidential documents — store them securely, transmit only over encrypted
@@ -499,15 +625,92 @@ The three SVG charts on the Institution Evaluation tab are fully accessible:
 
 | Control | Implementation |
 |---------|---------------|
-| localStorage encryption | AES-256-GCM via Web Crypto API |
+| Snapshot encryption | AES-256-GCM via Web Crypto API |
+| Evaluator identity | Initials held in memory and in the encrypted envelope only — never written to storage in the clear |
+| Printed analyst output | Every analyst evaluation prints with an INTERNAL — DO NOT SEND TO THE VENDOR banner |
 | Encryption key storage | sessionStorage only (tab-scoped, not persisted) |
-| Plaintext fallback | None — save is rejected if Web Crypto unavailable |
+| Plaintext fallback | None — the snapshot is rejected if Web Crypto is unavailable |
 | Input validation on load | Shape, type, length, and tag-injection checks on every record |
-| DOM XSS prevention | All user content written via `textContent`/`.value`; no `innerHTML` with user data |
+| DOM XSS prevention | All user content written via `createTextNode`/`textContent`/`.value`; `innerHTML` is never used, so vendor text renders verbatim and markup in it cannot execute |
 | CSV formula injection | OWASP prefix mitigation (`'`) on cells starting with `= + - @ \t \r` |
 | Attribute injection | `attr()` helper blocks `on*` event-handler attributes and `javascript:` URLs |
-| Content Security Policy | `default-src 'self'` · `script-src 'self'` · `style-src 'self'` · `object-src 'none'` · `base-uri 'self'` · `form-action 'none'` · `frame-ancestors 'none'` |
+| Content Security Policy | `default-src 'self'` · `script-src 'self'` · `style-src 'self'` · `img-src 'self' data:` · `object-src 'none'` · `base-uri 'self'` · `form-action 'none'` · `frame-ancestors 'none'` |
 | No external dependencies | Zero network requests — no CDN scripts, no remote fonts, no analytics |
+
+### Bundled third-party libraries
+
+Both libraries are vendored locally and loaded with `script-src 'self'`; the
+tool never fetches them from a CDN. Record of what is committed, so the files
+can be verified independently:
+
+| File | Library | Version | Source | SHA-256 |
+|---|---|---|---|---|
+| `xlsx.mini.min.js` | SheetJS Community Edition | 0.20.3 | `https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js` | `0cb353f830d7288385492c83d277b058ddeac664ca51cf1393aa1fd3e2b70939` |
+| `fflate.min.js` | fflate (UMD build) | see file header | vendored | `462ef8041fc970e3615a20a9dd2b2e3047a073b2da729ef4f02b634bba8b7b83` |
+
+Verify a copy with `sha256sum xlsx.mini.min.js`.
+
+**Keep SheetJS current.** It parses vendor-supplied `.xlsx` files, which are
+untrusted input, so it is the highest-value dependency to patch. Versions
+before 0.19.3 carry a prototype-pollution advisory and versions before 0.20.2
+carry a regular-expression denial-of-service advisory; 0.20.3 clears both.
+SheetJS Community Edition is no longer published to npm, so upgrades mean
+downloading a new build from `cdn.sheetjs.com`, replacing the file, and
+re-running an import round-trip through both the worker and the
+main-thread fallback path.
+
+### Spreadsheet parsing and the worker sandbox
+
+Vendor `.xlsx` files are parsed inside a Web Worker, which has its own global
+scope, so a malformed or hostile workbook cannot reach the page holding the
+assessment. That isolation is **best effort**, and it is worth knowing when it
+is absent.
+
+Browsers refuse to start a worker from a `file://` page, which is the mode
+this README recommends first. When that happens the tool parses on the main
+thread instead and shows a message saying the sandbox was unavailable. The
+same fallback now also covers a worker that starts but cannot run, which
+previously failed the import outright.
+
+| Situation | Parsed where | Told to the user |
+|---|---|---|
+| Served over http or https | Worker | Nothing, this is the normal path |
+| Opened from a file path | Main thread | Yes, once per session |
+| Worker starts but fails | Main thread | Yes, once per session, with the worker's reason |
+| Worker hangs past 30 seconds | Nowhere, import fails | Yes, as an error |
+
+A hanging worker is deliberately **not** retried on the main thread. A file
+that hangs the sandbox is exactly the file you do not want to then run
+without one.
+
+There is no Blob-worker middle tier. A worker has to `importScripts` the
+280 KB parser, and a `file://` page cannot hand it that script for the same
+origin reason that blocks the worker in the first place.
+
+If you are handed a workbook you have reason to distrust, open the tool from
+a web address rather than a file path and the isolation comes back. Keeping
+SheetJS patched matters either way, because the main thread is where it runs
+whenever the sandbox is unavailable.
+
+### Deploying behind nginx
+
+nginx inherits `add_header` from an outer level **only if** the current level
+declares none of its own, and a regex `location` takes precedence over the
+prefix `location /`. So the common pattern of putting security headers in
+`location /` and a `Cache-Control` header in `location ~* \.html$` silently
+serves HTML, JS and CSS with **no security headers at all**.
+
+The supplied `nginx.conf` avoids this by declaring every header once at
+`server{}` level and driving Cache-Control from a `map` variable, so no
+location block ever declares an `add_header`. After deploying, verify:
+
+```
+curl -sI https://your.host/index.html | grep -i content-security-policy
+```
+
+If that comes back empty, an `add_header` has been reintroduced inside a
+location block. The Apache and Caddy configs are not affected; their header
+directives merge across contexts rather than replacing them.
 
 ### Deployment note
 
@@ -528,10 +731,10 @@ where other applications also run.
 | Firefox | 84+ |
 | Safari | 15+ |
 
-The Web Crypto API (`window.crypto.subtle`) is required for Save Progress. All
+The Web Crypto API (`window.crypto.subtle`) is required for snapshots. All
 modern browsers listed above support it. If you are in a restricted environment
 where Web Crypto is unavailable, use **Export JSON** to preserve your responses
-instead — saving to localStorage will be blocked.
+instead — snapshots will be blocked.
 
 ---
 
@@ -577,7 +780,7 @@ Every server configuration sets these headers:
 
 | Header | Value | Purpose |
 |--------|-------|---------|
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';` | Prevents XSS, clickjacking, and injection |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';` | Prevents XSS, clickjacking, and injection |
 | `X-Frame-Options` | `DENY` | Clickjacking defence (complements CSP `frame-ancestors`) |
 | `X-Content-Type-Options` | `nosniff` | Prevents MIME-type confusion attacks |
 | `Referrer-Policy` | `no-referrer` | Prevents URLs containing response data from leaking to third parties |

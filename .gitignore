@@ -6,3 +6,8 @@ Thumbs.db
 .idea/
 .vscode/
 node_modules/
+.claude/
+
+# Never commit secrets, even though this tool uses none today
+.env
+.env.*

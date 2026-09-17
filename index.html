@@ -10,7 +10,7 @@
     (e.g. early preload requests, browser quirks).  See server-configs/ folder.
   -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';">
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta name="referrer" content="no-referrer">
   <!-- X-Frame-Options and Strict-Transport-Security cannot be set via meta tags;
@@ -32,15 +32,17 @@
         <h1>Higher Education Community Vendor Assessment Toolkit</h1>
         <p>Solution Provider Response &mdash; EDUCAUSE &copy; 2025</p>
       </div>
-      <div class="hdr-date" id="hdr-date" aria-label="Today's date"></div>
-
-      <!-- Evaluator initials: labels this person's comments on export/merge -->
-      <div class="hdr-initials">
-        <label class="hdr-initials-lbl" for="eval-initials">Evaluator initials</label>
-        <input class="hdr-initials-in" id="eval-initials" type="text"
-               maxlength="8" autocomplete="off" spellcheck="false"
-               placeholder="ABC" aria-describedby="eval-initials-help">
-        <span id="eval-initials-help" class="sr-only">Your initials are added to the exported file and used to label your comments when assessments are merged.</span>
+      <!-- Evaluator block: today's date sits above the initials field -->
+      <div class="hdr-eval">
+        <div class="hdr-date" id="hdr-date" aria-label="Today's date"></div>
+        <!-- Evaluator initials: labels this person's comments on export/merge -->
+        <div class="hdr-initials">
+          <label class="hdr-initials-lbl" for="eval-initials">Evaluator initials</label>
+          <input class="hdr-initials-in" id="eval-initials" type="text"
+                 maxlength="8" autocomplete="off" spellcheck="false"
+                 placeholder="ABC" aria-describedby="eval-initials-help">
+          <span id="eval-initials-help" class="sr-only">Your initials are added to the exported file and used to label your comments when assessments are merged.</span>
+        </div>
       </div>
 
       <!-- Display controls: dark mode + font size — in header for persistent access -->
@@ -90,6 +92,13 @@
     </div>
   </div>
 
+  <!-- Assertive, persistent alert for data-durability warnings (save scope,
+       failed decrypt). role="alert" carries an implicit aria-live="assertive",
+       so a screen reader interrupts with it rather than queuing it. The node is
+       present from page load and empty; injecting text is what announces.
+       Page-level on purpose - the sidebar collapses to a rail. -->
+  <div id="storage-alert" class="storage-alert" role="alert" aria-atomic="true"></div>
+
   <div class="wrap">
 
     <aside aria-label="Section navigation">
@@ -116,11 +125,11 @@
       </nav>
 
       <div class="side-btns">
-        <button class="btn btn-nv" id="btn-save" title="Save Progress" aria-label="Save encrypted progress to browser storage">
-          <span class="btn-i" aria-hidden="true">&#x1F4BE;</span><span class="btn-l">Save Progress</span>
+        <button class="btn btn-nv" id="btn-save" title="Take Snapshot (this browser tab only)" aria-label="Take Snapshot: keep an encrypted copy of your work in this browser tab. It cannot be opened after the browser closes — use Export JSON for a lasting copy.">
+          <span class="btn-i" aria-hidden="true">&#x1F4F7;</span><span class="btn-l">Take Snapshot</span>
         </button>
-        <button class="btn btn-ol" id="btn-load" title="Load Progress" aria-label="Load previously saved progress from browser storage">
-          <span class="btn-i" aria-hidden="true">&#x1F4C2;</span><span class="btn-l">Load Progress</span>
+        <button class="btn btn-ol" id="btn-load" title="Restore Snapshot (taken in this browser tab)" aria-label="Restore Snapshot: bring back the encrypted copy taken earlier in this browser tab.">
+          <span class="btn-i" aria-hidden="true">&#x1F504;</span><span class="btn-l">Restore Snapshot</span>
         </button>
         <button class="btn btn-gd" id="btn-exp" title="Export JSON" aria-label="Export all responses as JSON file">
           <span class="btn-i" aria-hidden="true">&#x2913;J</span><span class="btn-l">Export JSON</span>
@@ -128,22 +137,22 @@
         <button class="btn btn-ol" id="btn-csv" title="Export CSV" aria-label="Export all responses as CSV file">
           <span class="btn-i" aria-hidden="true">&#x2913;C</span><span class="btn-l">Export CSV</span>
         </button>
-        <button class="btn btn-ol" id="btn-exp-xlsx" title="Export XLSX" aria-label="Export all responses as a completed HECVAT Excel spreadsheet">
-          <span class="btn-i" aria-hidden="true">&#x2913;X</span><span class="btn-l">Export XLSX</span>
+        <button class="btn btn-ol" id="btn-exp-xlsx" title="Export HECVAT (Excel)" aria-label="Export HECVAT: all responses as a completed official HECVAT Excel workbook">
+          <span class="btn-i" aria-hidden="true">&#x2913;X</span><span class="btn-l">Export HECVAT</span>
         </button>
-        <button class="btn btn-ol" id="btn-imp-json" title="Import JSON" aria-label="Import responses from a previously exported JSON file">
+        <button class="btn btn-ol" id="btn-imp-json" title="Import JSON (select several files to merge reviews)" aria-label="Import JSON: responses from previously exported JSON files. Select several files at once to merge multiple evaluators' reviews">
           <span class="btn-i" aria-hidden="true">&#x2912;J</span><span class="btn-l">Import JSON</span>
         </button>
         <button class="btn btn-ol" id="btn-imp-csv" title="Import CSV" aria-label="Import responses from a previously exported CSV file">
           <span class="btn-i" aria-hidden="true">&#x2912;C</span><span class="btn-l">Import CSV</span>
         </button>
-        <button class="btn btn-ol" id="btn-imp-xlsx" title="Import XLSX" aria-label="Import responses from an official HECVAT Excel spreadsheet">
-          <span class="btn-i" aria-hidden="true">&#x2912;X</span><span class="btn-l">Import XLSX</span>
+        <button class="btn btn-ol" id="btn-imp-xlsx" title="Import HECVAT (Excel)" aria-label="Import HECVAT: responses from an official HECVAT Excel workbook">
+          <span class="btn-i" aria-hidden="true">&#x2912;X</span><span class="btn-l">Import HECVAT</span>
         </button>
         <button class="btn btn-ol" id="btn-prt" title="Print" aria-label="Print this assessment form">
           <span class="btn-i" aria-hidden="true">&#x1F5A8;&#xFE0F;</span><span class="btn-l">Print</span>
         </button>
-        <button class="btn btn-danger" id="btn-clear" title="Clear &amp; Reset" aria-label="Clear all saved progress and responses from browser storage">
+        <button class="btn btn-danger" id="btn-clear" title="Clear &amp; Reset" aria-label="Clear &amp; Reset: delete the snapshot, your responses and analyst evaluations from this browser">
           <span class="btn-i" aria-hidden="true">&#x1F5D1;&#xFE0F;</span><span class="btn-l">Clear &amp; Reset</span>
         </button>
 
@@ -152,13 +161,15 @@
       <!-- Storage status indicator -->
       <div id="storage-status" role="status" aria-live="polite" class="storage-status"></div>
     </aside>
-    </aside>
 
     <main id="main" tabindex="-1" aria-label="Assessment form sections"></main>
 
   </div>
 
-  <!-- SheetJS — local bundle for XLSX parsing (import), no external network request -->
+  <!-- SheetJS Community Edition 0.20.3 — local bundle for XLSX parsing (import),
+       no external network request. Parses untrusted vendor workbooks, so keep it
+       patched: <0.19.3 has a prototype-pollution advisory, <0.20.2 a ReDoS advisory.
+       Source + SHA-256 recorded in README "Bundled third-party libraries". -->
   <script src="xlsx.mini.min.js"></script>
   <!-- fflate — local zip read/write used to inject answers into the official
        HECVAT workbook on export. The ~1.2 MB template (hecvat-template.js) is

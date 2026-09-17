@@ -130,10 +130,12 @@ header {
 }
 .logo { border-right: 1px solid rgba(255,255,255,.2); padding-right: 1.25rem; flex-shrink: 0; }
 .logo-name { font-size: 1.9rem; font-weight: 800; color: var(--gold2); letter-spacing: -.03em; line-height: 1; font-family: Georgia, serif; }
-.logo-ver  { font-size: .6rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #ffffff; }
+.logo-ver  { font-size: .95rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #ffffff; margin-top: .2rem; }
 .hdr-title h1 { font-size: .9rem; font-weight: 700; }
 .hdr-title p  { font-size: .72rem; color: #ffffff; }
-.hdr-date     { font-size: .72rem; color: #ffffff; white-space: nowrap; margin-left: auto; }
+/* Evaluator block: date stacked above the initials field, right-aligned */
+.hdr-eval     { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; margin-left: auto; flex-shrink: 0; }
+.hdr-date     { font-size: .72rem; color: #ffffff; white-space: nowrap; }
 
 /* ── Header evaluator initials ── */
 .hdr-initials {
@@ -229,7 +231,7 @@ header {
     white-space: nowrap;
     border: 0;
   }
-  .hdr-initials { margin-left: auto; }
+  .hdr-eval { margin-left: auto; }
 }
 @media (max-width: 480px) {
   .hdr-fz-display { display: none; }
@@ -259,6 +261,55 @@ header {
 .si-noncompliant { color: #fca5a5; }
 .si-critical     { color: #fca5a5; }
 .btn-sum-action  { margin-left: auto; padding: .28rem .75rem; font-size: .72rem; width: auto; }
+.storage-alert {
+  width: 70%;
+  max-width: none;
+  margin: .75rem auto 0;
+  padding: .85rem 1rem;
+  border: 2px solid var(--amber);
+  border-left-width: 6px;
+  border-radius: var(--r);
+  background: var(--amber-bg);
+  color: var(--text);
+  font-size: .82rem;
+  line-height: 1.45;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .3rem .9rem;
+  align-items: start;
+}
+.storage-alert:empty { display: none; }          /* collapses when unused */
+.storage-alert-error { border-color: var(--red); background: var(--red-bg); }
+.storage-alert-h { grid-column: 1; font-size: .88rem; }
+.storage-alert-error .storage-alert-h { color: var(--red); }
+.storage-alert-p { grid-column: 1; margin: 0; }
+.storage-alert-x {
+  grid-column: 2; grid-row: 1 / span 2;
+  align-self: start;
+  font: inherit; font-size: .75rem; font-weight: 700;
+  padding: .3rem .8rem; min-height: 24px;
+  border: 1.5px solid var(--g3); border-radius: var(--r);
+  background: var(--white); color: var(--text2); cursor: pointer;
+}
+.storage-alert-go {
+  grid-column: 2; grid-row: 1;
+  align-self: start; justify-self: end;
+  font: inherit; font-size: .75rem; font-weight: 700;
+  padding: .3rem .9rem; min-height: 24px; white-space: nowrap;
+  border: 1.5px solid var(--navy); border-radius: var(--r);
+  background: var(--navy); color: #fff; cursor: pointer;
+}
+.storage-alert-go:hover { background: var(--navy2); border-color: var(--navy2); }
+.storage-alert-go:focus-visible { outline: 3px solid var(--navy2); outline-offset: 2px; }
+/* With an action present, Dismiss drops to the second row of the side column */
+.storage-alert:has(.storage-alert-go) .storage-alert-x { grid-row: 2; grid-column: 2; justify-self: end; }
+.storage-alert-x:hover { border-color: var(--navy2); color: var(--text); }
+.storage-alert-x:focus-visible { outline: 3px solid var(--navy2); outline-offset: 2px; }
+[data-theme="dark"] .storage-alert   { color: var(--text); }   /* --amber-bg/--red-bg already flip per theme */
+[data-theme="dark"] .storage-alert-x { background: var(--input-bg); border-color: var(--input-bdr); color: var(--text); }
+@media (max-width: 900px) { .storage-alert { width: auto; margin-left: 1rem; margin-right: 1rem; } }
+@media print { .storage-alert { display: none; } }
+
 .storage-status  { margin-top: .5rem; font-size: .68rem; color: var(--g4); text-align: center; padding: 0 .5rem; }
 .storage-status.status-ok      { color: var(--green); }
 .storage-status.status-warn    { color: var(--amber); }
@@ -1338,7 +1389,7 @@ textarea { resize: vertical; min-height: 70px; }
 
 /* Filter chips */
 .hr-chips       { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.55rem; }
-.hr-chip        { font-size:.73rem; font-weight:600; padding:.28rem .7rem; border-radius:16px; border:1.5px solid var(--g3); background:var(--white); color:var(--text2); cursor:pointer; }
+.hr-chip        { font-size:.73rem; font-weight:600; padding:.4rem .7rem; min-height:24px; border-radius:16px; border:1.5px solid var(--g3); background:var(--white); color:var(--text2); cursor:pointer; }
 .hr-chip:hover  { border-color:var(--navy2); }
 .hr-chip.active { background:var(--navy); border-color:var(--navy); color:#fff; }
 
@@ -1411,6 +1462,22 @@ h2.snav-hd-eval { background: #1e3a5f; }
   /* Hide all panels except the active one */
   .panel { display: none !important; }
   .panel.active { display: block !important; page-break-inside: avoid; }
+
+  /* Confidentiality banner: hidden on screen, shown on every printed page
+     of an analyst evaluation so a PDF cannot be mistaken for vendor-facing. */
+  .eval-print-warning {
+    display: block !important;
+    border: 3px solid #b91c1c;
+    background: #fff;
+    color: #000;
+    padding: .5rem .7rem;
+    margin: 0 0 .8rem 0;
+    font-size: 10pt;
+    line-height: 1.35;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .eval-print-warning strong { display: block; color: #b91c1c; letter-spacing: .02em; }
 
   /* Expand all collapsed category sections when printing */
   .cat-body.cat-collapsed,
@@ -1588,6 +1655,93 @@ h2.snav-hd-eval { background: #1e3a5f; }
 [data-theme="dark"] .plot-legend-sw.plot-pw-cell-sig2 { background: #c2410c; }
 [data-theme="dark"] .plot-legend-sw.plot-pw-cell-sig1 { background: #a16207; }
 [data-theme="dark"] .plot-legend-sw.plot-pw-cell-ns   { background: #2a2a27; }
+
+/* ── Evaluator radar graph ─────────────────────────────────────── */
+.radar-wrap .plot-svg-host { max-width: 620px; margin: 0 auto; }
+.radar-svg        { max-height: 620px; }
+.radar-grid       { fill: none; stroke: #cfcfc6; stroke-width: 1; }
+.radar-axis       { stroke: #8a8a80; stroke-width: 1; }
+.radar-ring-lbl   { font-size: 9px; }
+.radar-lbl        { font-size: 11px; }
+.radar-poly       { stroke-width: 2.5; stroke-linejoin: round; }
+.radar-poly.radar-vendor  { fill: rgba(30, 64, 175, .14); stroke: #1e40af; }
+.radar-poly.radar-eval    { fill: rgba(21, 128, 61, .20); stroke: #15803d; }
+.radar-marker.radar-vendor { fill: #ffffff; stroke: #1e40af; stroke-width: 2; }
+.radar-marker.radar-eval   { fill: #15803d; stroke: #ffffff; stroke-width: 1.5; }
+/* High-risk radar series: critical (amber, dashed) vs non-negotiable (purple, solid) */
+.radar-poly.radar-crit    { fill: rgba(180, 83, 9, .14); stroke: #b45309; }
+.radar-poly.radar-nn      { fill: rgba(109, 40, 217, .18); stroke: #6d28d9; }
+.radar-marker.radar-crit  { fill: #ffffff; stroke: #b45309; stroke-width: 2; }
+.radar-marker.radar-nn    { fill: #6d28d9; stroke: #ffffff; stroke-width: 1.5; }
+.radar-legend-sw.radar-crit { background: rgba(180,83,9,.14); border: 2px dashed #b45309; }
+.radar-legend-sw.radar-nn   { background: rgba(109,40,217,.18); border: 2px solid #6d28d9; border-radius: 50%; }
+/* Failed non-negotiable flag: thick red spoke + "!" badge + red label */
+.radar-axis.radar-axis-nnfail { stroke: #b91c1c; stroke-width: 3; }
+.radar-lbl.radar-lbl-nnfail   { fill: #b91c1c; font-weight: 800; }
+.radar-nnfail-badge           { fill: #b91c1c; stroke: #ffffff; stroke-width: 1.5; }
+.radar-nnfail-badge-txt       { fill: #ffffff; font-size: 12px; font-weight: 800; }
+.radar-legend-sw.radar-legend-nnfail { background: #b91c1c; color: #fff; border-radius: 50%; border: 0; text-align: center; font-weight: 800; font-size: 12px; line-height: 18px; }
+[data-theme="dark"] .radar-poly.radar-crit   { fill: rgba(251, 191, 36, .16); stroke: #fbbf24; }
+[data-theme="dark"] .radar-poly.radar-nn     { fill: rgba(196, 181, 253, .2); stroke: #c4b5fd; }
+[data-theme="dark"] .radar-marker.radar-crit { fill: #1a1a1a; stroke: #fbbf24; }
+[data-theme="dark"] .radar-marker.radar-nn   { fill: #c4b5fd; stroke: #1a1a1a; }
+[data-theme="dark"] .radar-legend-sw.radar-crit { background: rgba(251,191,36,.16); border-color: #fbbf24; }
+[data-theme="dark"] .radar-legend-sw.radar-nn   { background: rgba(196,181,253,.2); border-color: #c4b5fd; }
+[data-theme="dark"] .radar-axis.radar-axis-nnfail { stroke: #f87171; }
+[data-theme="dark"] .radar-lbl.radar-lbl-nnfail   { fill: #f87171; }
+[data-theme="dark"] .radar-nnfail-badge           { fill: #f87171; stroke: #1a1a1a; }
+[data-theme="dark"] .radar-nnfail-badge-txt       { fill: #1a1a1a; }
+/* Note-backed marker dot + legend swatch */
+.radar-note-dot { fill: #1a1a1a; }
+[data-theme="dark"] .radar-note-dot { fill: #ffffff; }
+.radar-legend-sw.radar-legend-notedot { background: #fff; border: 2px dashed #1e40af; position: relative; }
+.radar-legend-sw.radar-legend-notedot::after { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #1a1a1a; }
+[data-theme="dark"] .radar-legend-sw.radar-legend-notedot { background: #1a1a1a; border-color: #93c5fd; }
+[data-theme="dark"] .radar-legend-sw.radar-legend-notedot::after { background: #fff; }
+/* Failed non-negotiable drill-down */
+.nn-drill        { margin-top: 1rem; }
+.nn-drill-h      { font-size: .85rem; font-weight: 700; color: #b91c1c; margin: 0 0 .5rem; }
+.nn-drill-empty  { font-size: .78rem; color: var(--text2); font-style: italic; }
+.nn-drill-list   { list-style: none; margin: 0; padding: 0; }
+.nn-drill-item   { border: 1px solid var(--g2); border-left: 4px solid #b91c1c; border-radius: var(--r); padding: .7rem .9rem; margin-bottom: .7rem; background: var(--white); page-break-inside: avoid; }
+.nn-drill-head   { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: .3rem; }
+.nn-drill-sec    { font-size: .72rem; color: var(--text2); }
+.nn-drill-q      { font-size: .82rem; font-weight: 600; margin-bottom: .55rem; }
+.nn-drill-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+.nn-drill-col strong { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .25rem; }
+.nn-drill-col p  { font-size: .8rem; margin: 0; white-space: pre-wrap; }
+.nn-drill-vendor { border-left: 3px solid #1e40af; padding-left: .6rem; }
+.nn-drill-eval   { border-left: 3px solid #15803d; padding-left: .6rem; }
+.nn-drill-none   { color: var(--text2); font-style: italic; }
+.nn-drill-ov     { font-size: .74rem !important; font-weight: 700; color: #b91c1c; margin-top: .3rem !important; }
+@media (max-width: 700px) { .nn-drill-grid { grid-template-columns: 1fr; } }
+[data-theme="dark"] .nn-drill-item { background: var(--panel-bg); border-color: var(--g3); border-left-color: #f87171; }
+[data-theme="dark"] .nn-drill-h, [data-theme="dark"] .nn-drill-ov { color: #f87171; }
+/* Vendor notes appendix */
+.notes-appx-sec  { font-size: .8rem; font-weight: 700; color: var(--navy2); margin: .8rem 0 .3rem; }
+.notes-appx-list { margin: 0; padding: 0; }
+.notes-appx-list dt { font-size: .8rem; font-weight: 600; margin-top: .5rem; display: flex; gap: .45rem; align-items: baseline; flex-wrap: wrap; }
+.notes-appx-list dd { margin: .2rem 0 0 0; font-size: .8rem; white-space: pre-wrap; padding: .4rem .7rem; background: var(--g1); border-radius: var(--r); }
+.vendor-ans-inline { font-size: .7rem; font-weight: 700; padding: .05rem .45rem; border-radius: 10px; background: var(--g2); }
+[data-theme="dark"] .notes-appx-sec { color: var(--gold2); }
+[data-theme="dark"] .notes-appx-list dd { background: var(--g2); }
+@media print { .notes-appx { page-break-before: always; break-before: page; } }
+.eval-print-warning { display: none; }   /* print-only; revealed in @media print */
+.radar-marker.radar-nodata { fill: none; stroke-width: 2; }
+.radar-marker.radar-nodata.radar-vendor { stroke: #1e40af; }
+.radar-marker.radar-nodata.radar-eval   { stroke: #15803d; }
+.radar-chips      { margin: .2rem 0 .6rem; }
+.radar-chips[hidden] { display: none; }
+.radar-legend-sw.radar-vendor { background: rgba(30,64,175,.14); border: 2px dashed #1e40af; }
+.radar-legend-sw.radar-eval   { background: rgba(21,128,61,.2);  border: 2px solid  #15803d; border-radius: 50%; }
+[data-theme="dark"] .radar-grid   { stroke: #3a3a36; }
+[data-theme="dark"] .radar-axis   { stroke: #6b6b62; }
+[data-theme="dark"] .radar-poly.radar-vendor  { fill: rgba(96, 165, 250, .18); stroke: #93c5fd; }
+[data-theme="dark"] .radar-poly.radar-eval    { fill: rgba(74, 222, 128, .20); stroke: #4ade80; }
+[data-theme="dark"] .radar-marker.radar-vendor { fill: #1a1a1a; stroke: #93c5fd; }
+[data-theme="dark"] .radar-marker.radar-eval   { fill: #4ade80; stroke: #1a1a1a; }
+[data-theme="dark"] .radar-legend-sw.radar-vendor { background: rgba(96,165,250,.18); border-color: #93c5fd; }
+[data-theme="dark"] .radar-legend-sw.radar-eval   { background: rgba(74,222,128,.2);  border-color: #4ade80; }
 
 .plot-grid       { stroke: #dcdcd3; stroke-width: 1; stroke-dasharray: 2 3; }
 .plot-axis-line  { stroke: #7a7a70; stroke-width: 1; }

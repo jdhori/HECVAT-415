@@ -57,6 +57,13 @@ var HECVAT_SEC = (function () {
   var MAX_FIELD   = 8000;              // max chars per user string field
 
   /* ── Sanitise user input before DOM insertion ────────────────── */
+  /* HTML-entity escaper. NOT a security control and currently unused: every
+     render path in this tool writes through document.createTextNode() or
+     .textContent, which cannot interpret markup, so escaping beforehand only
+     double-encodes the text the user sees. Kept for the single case that
+     would need it — if a future change ever introduces an HTML-parsing sink
+     (innerHTML, insertAdjacentHTML, a template), escape at THAT sink with
+     this, and treat its absence elsewhere as correct rather than missing. */
   function sanitize(s) {
     if (typeof s !== 'string') return '';
     return s
@@ -163,7 +170,10 @@ var HECVAT_SEC = (function () {
   function validateRecord(qid, record) {
     /* qid must look like XXXX-NN */
     if (!/^[A-Z]{2,5}-\d{1,3}$/.test(qid)) return null;
-    if (!record || typeof record !== 'object') return null;
+    /* typeof [] === 'object', so arrays must be excluded explicitly —
+       otherwise ["Yes"] slips through, contributes no value/notes, and is
+       still counted as an imported record. Mirrors validateAERecord. */
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
 
     var out = {};
 
@@ -198,6 +208,10 @@ var HECVAT_SEC = (function () {
       out.notes = record.notes;
     }
 
+    /* A record that carried neither a value nor notes imported nothing —
+       report it as rejected so the "Imported N response(s)" count is honest. */
+    if (!Object.keys(out).length) return null;
+
     return out;
   }
 
@@ -207,8 +221,18 @@ var HECVAT_SEC = (function () {
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     return arr;
   }
+  /* Convert in chunks. Passing a whole array through Function.prototype.apply
+     makes every byte a separate argument, which blows the engine's argument
+     limit above roughly 65 KB — a realistic assessment with notes is far
+     larger, so the old one-shot form made snapshots fail outright. Chunked
+     output is byte-identical, so snapshots taken by earlier versions still
+     decode. */
   function arrToB64(arr) {
-    return btoa(String.fromCharCode.apply(null, new Uint8Array(arr)));
+    var a = new Uint8Array(arr), CHUNK = 0x8000, out = '';
+    for (var i = 0; i < a.length; i += CHUNK) {
+      out += String.fromCharCode.apply(null, a.subarray(i, i + CHUNK));
+    }
+    return btoa(out);
   }
 
   /* ── Key management ─────────────────────────────────────────── */
@@ -235,7 +259,7 @@ var HECVAT_SEC = (function () {
       /* Hard failure — never persist sensitive data unencrypted */
       return Promise.reject(new Error(
         'Web Crypto API is not available in this browser. ' +
-        'Saving is disabled to protect sensitive assessment data. ' +
+        'Snapshots are disabled to protect sensitive assessment data. ' +
         'Use Export JSON to preserve your responses.'
       ));
     }
@@ -289,7 +313,13 @@ var HECVAT_SEC = (function () {
     sessionStorage.removeItem(SS_KEY);
   }
 
-  return { sanitize: sanitize, validateRecord: validateRecord, validateAERecord: validateAERecord, saveEncrypted: saveEncrypted, loadDecrypted: loadDecrypted, clearAll: clearAll };
+  /* Is a snapshot stored at all? Says nothing about whether it can still be
+     decrypted — that needs the session key and an actual decrypt attempt. */
+  function hasSnapshot() {
+    try { return !!localStorage.getItem(LS_KEY); } catch (e) { return false; }
+  }
+
+  return { sanitize: sanitize, validateRecord: validateRecord, validateAERecord: validateAERecord, saveEncrypted: saveEncrypted, loadDecrypted: loadDecrypted, clearAll: clearAll, hasSnapshot: hasSnapshot };
 }());
 
 (function () {
@@ -839,8 +869,11 @@ var HECVAT_SEC = (function () {
     } else if (val === 'N/A') {
       el.appendChild(txt('\u2014 N/A'));  el.classList.add('ref-na');
     } else {
-      /* User free-text: sanitise then truncate for display */
-      var safe = HECVAT_SEC.sanitize(val);
+      /* User free-text. No HTML-escaping here: the destination is a text
+         node, which cannot interpret markup. Escaping first would show the
+         entities literally (a vendor writing "AT&T" would read "AT&amp;T")
+         and would spend the truncation budget on entity characters. */
+      var safe = val;
       el.appendChild(txt(safe.length > 70 ? safe.slice(0, 70) + '\u2026' : safe));
       el.classList.add('ref-txt');
     }
@@ -1277,8 +1310,9 @@ var HECVAT_SEC = (function () {
     if (id === 'summary') renderSummary();
     /* Refresh eval scorecard when navigating to an eval tab */
     if (typeof EVAL_SECS !== 'undefined' && EVAL_SECS.some(function(es){ return es.id === id; })) {
+      /* refreshHighRiskScorecard() (via refreshEvalScorecard) also updates
+         the non-negotiable count banner, so nothing else is needed here. */
       refreshEvalScorecard(id);
-      refreshNNSummary();
     }
   }
 
@@ -1588,34 +1622,153 @@ var HECVAT_SEC = (function () {
   ================================================================ */
 
   var storageStatus = document.getElementById('storage-status');
+  var statusTimer = null;
+
+  /* ── Assertive alert ──────────────────────────────────────────
+     For messages about whether the user's work still exists. These are not
+     toasts: they do not auto-expire, because someone who steps away must
+     still find out that a save is session-scoped or that a copy could not be
+     opened. The host node carries role="alert" (implicit aria-live
+     "assertive" + aria-atomic), is in the DOM from page load, and is empty
+     until needed, so writing text into it is what triggers the interruption.
+     The dismiss control sits inside the region deliberately: it is announced
+     as part of the alert, which tells the user the message can be cleared. */
+  var storageAlert = document.getElementById('storage-alert');
+
+  function showAlert(headline, detail, tone, action) {
+    if (!storageAlert) return;
+    /* Assemble off-DOM so the region changes in ONE mutation. Appending the
+       headline, body and button separately lets a screen reader read the
+       first insert and stop, which would announce the headline without the
+       explanation — the worst possible truncation for a data-loss notice. */
+    var frag = document.createDocumentFragment();
+    var h = mk('strong', 'storage-alert-h'); h.appendChild(txt(headline));
+    var p = mk('p', 'storage-alert-p'); p.appendChild(txt(detail));
+    var x = mk('button', 'storage-alert-x'); x.type = 'button';
+    attr(x, 'aria-label', 'Dismiss this message');
+    x.appendChild(txt('Dismiss'));
+    x.addEventListener('click', function () {
+      storageAlert.replaceChildren();
+      storageAlert.className = 'storage-alert';
+    });
+    frag.appendChild(h); frag.appendChild(p);
+    /* Optional primary action, e.g. "Restore snapshot". Placed before Dismiss
+       so it is the first control reached by keyboard. */
+    if (action && action.label && action.onClick) {
+      var go = mk('button', 'storage-alert-go'); go.type = 'button';
+      go.appendChild(txt(action.label));
+      go.addEventListener('click', function () {
+        storageAlert.replaceChildren();
+        storageAlert.className = 'storage-alert';
+        action.onClick();
+      });
+      frag.appendChild(go);
+    }
+    frag.appendChild(x);
+
+    /* Re-arm the live region around the swap: drop role, replace content,
+       force a reflow, restore role. This makes the announcement fire on a
+       settled subtree rather than racing the insert, which is what some
+       screen readers otherwise do. */
+    storageAlert.removeAttribute('role');
+    storageAlert.className = 'storage-alert' + (tone ? ' storage-alert-' + tone : '');
+    storageAlert.replaceChildren(frag);
+    void storageAlert.offsetHeight;
+    attr(storageAlert, 'role', 'alert');
+  }
   function setStatus(msg, state) {
     if (!storageStatus) return;
     /* state: 'ok' | 'warn' | 'error' | '' — drives CSS class, not inline style */
     storageStatus.textContent = msg;
     storageStatus.className = 'storage-status' + (state ? ' status-' + state : '');
-    if (msg) setTimeout(function () {
+    /* Only the newest message owns the hide timer — an earlier message's
+       timeout must never blank a later one (e.g. the group-import summary). */
+    if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+    if (msg) statusTimer = setTimeout(function () {
       storageStatus.textContent = '';
       storageStatus.className = 'storage-status';
+      statusTimer = null;
     }, 6000);
   }
 
+  /* The session-scope alert is shown once per browser session — on the first
+     save, which is when the user still has time to act on it. Later saves keep
+     a one-line reminder in the status area instead, so the warning is never
+     lost but never nags either. */
+  var sessionScopeWarned = false;
+
   function saveData() {
-    setStatus('Saving\u2026', 'pending');
+    setStatus('Taking snapshot\u2026', 'pending');
     /* Persist both the vendor responses (R) and the analyst evaluations
        (AE) together in a single envelope. Older saves (bare R map) stay
        readable via the shape detection in loadData below. */
-    HECVAT_SEC.saveEncrypted({ responses: R, evaluations: AE, initials: EVAL_INITIALS }).then(function () {
+    /* Drop records the UI created but never filled (e.g. a question that was
+       focused then left blank writes an empty {}). Storing them is pointless,
+       and on restore they would be counted as "invalid record(s) discarded",
+       which reads like data loss when nothing was lost. */
+    var cleanR = {};
+    Object.keys(R).forEach(function (qid) {
+      var r = R[qid];
+      if (r && ((r.value !== undefined && r.value !== '') || (r.notes !== undefined && r.notes !== ''))) cleanR[qid] = r;
+    });
+    HECVAT_SEC.saveEncrypted({ responses: cleanR, evaluations: AE, initials: EVAL_INITIALS }).then(function () {
       var ann = Object.keys(AE).length;
-      setStatus('Saved \u2014 AES-256-GCM encrypted' + (ann ? ' (' + ann + ' analyst override(s) included)' : ''), 'ok');
+      /* The reminder clause goes in the status line only AFTER the full alert
+         has been shown once. On the save that raises the alert, the status
+         stays terse so the polite and assertive regions do not speak over
+         each other about the same event. */
+      setStatus('Snapshot taken \u2014 AES-256-GCM encrypted'
+        + (ann ? ' (' + ann + ' analyst override(s) included)' : '')
+        + (sessionScopeWarned ? ' \u2014 this browser tab only; Export JSON for a lasting copy.' : ''), 'ok');
+      if (!sessionScopeWarned) {
+        sessionScopeWarned = true;
+        showAlert(
+          'Snapshot taken \u2014 worth reading once',
+          'A snapshot is a safety net for this browser tab: it brings your work back after '
+          + 'an accidental reload or a crash. It is encrypted with a key that exists only '
+          + 'for this browser session, so once you close the browser the snapshot cannot be '
+          + 'opened by anyone, including you. Use Export JSON for the copy you keep.',
+          'warn');
+      }
     }).catch(function (e) {
-      setStatus('Save failed: ' + e.message, 'error');
+      setStatus('Snapshot failed: ' + e.message, 'error');
+    });
+  }
+
+  /* ── Startup: say whether a snapshot is waiting ───────────────
+     Nothing is restored automatically — the user decides. But a reload used
+     to leave a blank form with no hint that the work was recoverable, which
+     reads as "my assessment is gone". So on load we check, and either offer
+     the restore or explain immediately that the snapshot has expired. */
+  function offerSnapshotRestore() {
+    if (!HECVAT_SEC || !HECVAT_SEC.hasSnapshot || !HECVAT_SEC.hasSnapshot()) return;
+    HECVAT_SEC.loadDecrypted().then(function (raw) {
+      if (!raw) return;
+      showAlert(
+        'A snapshot from this browser tab is waiting',
+        'Your work was not lost. A snapshot taken earlier in this browser tab can be '
+        + 'restored now. Nothing has been changed yet \u2014 restoring will merge it back '
+        + 'into the form.',
+        'warn',
+        { label: 'Restore snapshot', onClick: loadData });
+    }).catch(function (e) {
+      if (e && (e.name === 'OperationError' || !e.message)) {
+        showAlert(
+          'A snapshot is stored here, but it can no longer be opened',
+          'It was taken in an earlier browser session. For security the key that unlocks a '
+          + 'snapshot is kept only for the session that created it, so this one cannot be '
+          + 'decrypted by anyone, including you, and cannot be recovered. Use Import JSON to '
+          + 'restore your most recent export, then Clear & Reset to remove the stale '
+          + 'snapshot.',
+          'error');
+      }
     });
   }
 
   function loadData() {
-    setStatus('Loading\u2026', 'pending');
+    setStatus('Restoring snapshot\u2026', 'pending');
     HECVAT_SEC.loadDecrypted().then(function (raw) {
-      if (!raw) { setStatus('No saved data found.', ''); return; }
+      if (!raw) { setStatus('No snapshot found in this browser tab.', ''); return; }
 
       /* Detect envelope shape:
            { responses: {...}, evaluations: {...} }   — new format
@@ -1653,9 +1806,31 @@ var HECVAT_SEC = (function () {
       var tail = '';
       if (droppedR || droppedAE) tail = ' (' + (droppedR + droppedAE) + ' invalid record(s) discarded)';
       else if (aeCount)          tail = ' (' + aeCount + ' analyst override(s) restored)';
-      setStatus('Progress loaded' + tail + '.', (droppedR || droppedAE) ? 'warn' : 'ok');
+      setStatus('Snapshot restored' + tail + '.', (droppedR || droppedAE) ? 'warn' : 'ok');
     }).catch(function (e) {
-      setStatus('Load failed: ' + e.message, 'error');
+      /* A decrypt rejection (OperationError, and its message is empty) means
+         the ciphertext was written under a different session key — i.e. the
+         browser was closed since. Say so plainly instead of showing a blank
+         reason, and point at the export, which is the only recoverable copy. */
+      var sessionKeyGone = (e && (e.name === 'OperationError' || !e.message));
+      if (sessionKeyGone) {
+        /* Terse here; the alert below carries the explanation. */
+        setStatus('Snapshot could not be opened \u2014 see the message above.', 'error');
+        showAlert(
+          'That snapshot can no longer be opened',
+          'This is the security design working as intended, not something you did wrong. '
+          + 'The key that unlocks a save is kept only for the browser session that created '
+          + 'it, so a snapshot cannot be read once that session ends, by anyone. It '
+          + 'cannot be recovered. To pick up where you left off, use Import JSON to restore '
+          + 'your most recent export. If you do not have one, your answers will need to be '
+          + 're-entered \u2014 and from now on, Export JSON before you close the browser.',
+          'error');
+      } else {
+        setStatus('Snapshot could not be read: ' + (e && e.message ? e.message : 'unrecognised format.'), 'error');
+        showAlert('Snapshot could not be read',
+          (e && e.message ? e.message : 'The stored data was not in a recognisable format.')
+          + ' If you have a JSON export, use Import JSON to restore it.', 'error');
+      }
     });
   }
 
@@ -1797,6 +1972,9 @@ var HECVAT_SEC = (function () {
     /* Evaluator initials recorded at the end of the file; used to label this
        evaluator's comments when the export is later merged into another copy. */
     data.evaluatorInitials = sanitizeInitials(EVAL_INITIALS);
+    /* Computed radar snapshot (all tabs, all evaluators). Informational —
+       the importer ignores it and recomputes from the merged data. */
+    data.radar = radarExportData();
     dl(JSON.stringify(data, null, 2), 'application/json', 'HECVAT-416-responses.json');
     setStatus('JSON exported \u2014 handle as confidential', 'warn');
   }
@@ -1834,6 +2012,23 @@ var HECVAT_SEC = (function () {
        import to label this evaluator's comments when merging. */
     var ini = sanitizeInitials(EVAL_INITIALS);
     if (ini) rows.push(['# Evaluator Initials', ini]);
+    /* Radar snapshot rows (informational; skipped by the importer). One row
+       per tab × evaluator × section, prefixed "# Radar". */
+    var rd = radarExportData();
+    rows.push(['# Radar', 'Tab', 'Evaluator', 'Section', 'Label', 'Questions', 'Answered', 'N/A', 'Blank',
+               'Vendor %', 'Evaluator %', 'Critical %', 'Non-Negotiable %', 'Overrides', 'Analyst Notes',
+               'Vendor Notes', 'NN Flagged', 'NN Failed']);
+    Object.keys(rd.tabs).forEach(function (tab) {
+      Object.keys(rd.tabs[tab]).forEach(function (who) {
+        rd.tabs[tab][who].forEach(function (r) {
+          var pc = function (v) { return v === null ? 'n/a' : v; };
+          rows.push(['# Radar', tab, who, r.section, r.label, r.questions, r.answered, r.na, r.unanswered,
+                     pc(r.vendorPct), pc(r.evaluatorPct), pc(r.criticalPct), pc(r.nonNegotiablePct),
+                     r.overrides, r.analystNotes, r.vendorNotes, r.nonNegotiablesFlagged,
+                     r.nonNegotiablesFailed.join(' ')]);
+        });
+      });
+    });
     dl(rows.map(function (r) {
       return r.map(safeCsvCell).join(',');
     }).join('\n'), 'text/csv', 'HECVAT-416-responses.csv');
@@ -1850,19 +2045,22 @@ var HECVAT_SEC = (function () {
          the browser permits .click() without a trusted-event check
        - Cleaned up immediately after the user picks (or cancels)
   ================================================================ */
-  function openFilePicker(accept, onFile) {
+  function openFilePicker(accept, onFile, allowMultiple) {
     var input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
+    if (allowMultiple) input.multiple = true;
     /* Position off-screen — visible to the render tree but not to the user */
     input.style.cssText = 'position:fixed;top:-200px;left:-200px;width:1px;height:1px;opacity:0;';
     document.body.appendChild(input);
 
-    /* 'change' fires when a file is picked */
+    /* 'change' fires when a file is picked. With allowMultiple the handler
+       receives an array of every picked file; otherwise a single File. */
     input.addEventListener('change', function () {
-      var file = input.files && input.files[0];
+      var files = input.files ? Array.prototype.slice.call(input.files) : [];
       document.body.removeChild(input);
-      if (file) onFile(file);
+      if (!files.length) return;
+      if (allowMultiple) onFile(files); else onFile(files[0]);
     });
 
     /* 'cancel' fires in Chrome 113+ / Firefox 113+ when the picker is dismissed */
@@ -1876,22 +2074,66 @@ var HECVAT_SEC = (function () {
   /* ================================================================
      IMPORT — JSON
   ================================================================ */
+  /* Group import: the picker allows several JSON exports at once (one per
+     evaluator). Files are merged one after another through applyImport,
+     which already tracks per-field authorship and conflicts, so leadership
+     can review every evaluator's overrides side by side. */
   function importJSON() {
-    openFilePicker('.json,application/json', handleJSONImport);
+    openFilePicker('.json,application/json', handleJSONImportGroup, true);
   }
 
-  function handleJSONImport(file) {
-    setStatus('Reading ' + HECVAT_SEC.sanitize(file.name) + '\u2026', 'pending');
+  function handleJSONImportGroup(files) {
+    if (files.length > MAX_IMPORT_FILES) {
+      setStatus('Too many files (' + files.length + '). Import at most '
+                + MAX_IMPORT_FILES + ' at a time.', 'error');
+      return;
+    }
+    var idx = 0, okCount = 0, failed = [];
+    /* One merge confirmation for the whole batch instead of one per file. */
+    var skipConfirm = false;
+    if (files.length > 1) {
+      var existing   = Object.keys(R).filter(function (k) { return R[k] && R[k].value; }).length;
+      var existingAE = Object.keys(AE).length;
+      if (existing > 0 || existingAE > 0) {
+        var ok = window.confirm(
+          'Group import of ' + files.length + ' files.\n\n' +
+          'Each file will be merged into your current state (' + existing + ' answer(s), ' +
+          existingAE + ' analyst override(s)). Overrides from different evaluators are kept ' +
+          'side by side and conflicts are logged for review.\n\nContinue?');
+        if (!ok) { setStatus('Group import cancelled.', ''); return; }
+      }
+      skipConfirm = true;
+    }
+    function next() {
+      if (idx >= files.length) {
+        if (files.length > 1) {
+          var msg = 'Group import: merged ' + okCount + ' of ' + files.length + ' file(s)';
+          if (failed.length) msg += ' \u2014 could not read: ' + failed.join(', ');
+          msg += '. Evaluator views are available on the radar graphs and go/no-go report.';
+          setStatus(msg, failed.length ? 'warn' : 'ok');
+        }
+        return;
+      }
+      var file = files[idx++];
+      handleJSONImport(file, function (ok) { if (ok) okCount++; else failed.push(file.name); next(); }, skipConfirm);
+    }
+    next();
+  }
+
+  function handleJSONImport(file, done, skipConfirm) {
+    done = done || function () {};
+    if (!withinSizeLimit(file)) { done(false); return; }
+    setStatus('Reading ' + file.name + '\u2026', 'pending');
     var reader = new FileReader();
-    reader.onerror = function () { setStatus('Could not read file.', 'error'); };
+    reader.onerror = function () { setStatus('Could not read file.', 'error'); done(false); };
     reader.onload = function (ev) {
       var parsed;
       try { parsed = JSON.parse(ev.target.result); }
-      catch (err) { setStatus('File is not valid JSON: ' + err.message, 'error'); return; }
+      catch (err) { setStatus('File is not valid JSON: ' + err.message, 'error'); done(false); return; }
       /* Accept full export format { meta, responses:{...} } or bare { qid:{value,notes} } */
       var raw = (parsed && typeof parsed.responses === 'object') ? parsed.responses : parsed;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        setStatus('JSON structure not recognised. Expected a HECVAT export file.', 'error'); return;
+        setStatus('JSON structure not recognised. Expected a HECVAT export file.', 'error'); done(false); return;
       }
       /* Pick up analyst evaluations if the file carries them. */
       var rawAE = (parsed && typeof parsed.analystEvaluations === 'object' && !Array.isArray(parsed.analystEvaluations))
@@ -1900,7 +2142,7 @@ var HECVAT_SEC = (function () {
       /* File-level evaluator initials, if the export carried them, used to
          label the imported comments. */
       var fileIni = (parsed && (parsed.evaluatorInitials || (parsed.meta && parsed.meta.evaluatorInitials))) || '';
-      applyImport(raw, file.name, rawAE, fileIni);
+      done(applyImport(raw, file.name, rawAE, fileIni, skipConfirm) === true);
     };
     reader.readAsText(file);
   }
@@ -1913,7 +2155,8 @@ var HECVAT_SEC = (function () {
   }
 
   function handleCSVImport(file) {
-    setStatus('Reading ' + HECVAT_SEC.sanitize(file.name) + '\u2026', 'pending');
+    if (!withinSizeLimit(file)) return;
+    setStatus('Reading ' + file.name + '\u2026', 'pending');
     var reader = new FileReader();
     reader.onerror = function () { setStatus('Could not read file.', 'error'); };
     reader.onload = function (ev) {
@@ -1999,6 +2242,9 @@ var HECVAT_SEC = (function () {
         initials = stripInjectPrefix((cells[idCol + 1] || '').trim());
         continue;
       }
+      /* Any other "# ..." row is informational (e.g. the radar summary rows
+         written by exportCSV) — computed on import, never stored. */
+      if (qid.charAt(0) === '#') continue;
 
       /* Responses half */
       var entry = {};
@@ -2043,13 +2289,34 @@ var HECVAT_SEC = (function () {
   }
 
   /* ================================================================
-     IMPORT — HECVAT EXCEL (.xlsx)
-     - File size capped at MAX_XLSX_MB to block zip bombs
-     - Parsing runs inside a Web Worker (hecvat-worker.js) so a
-       malformed/malicious file cannot crash or exploit the main UI
+     IMPORT LIMITS (shared by JSON / CSV / XLSX)
+     Imported files come from vendors and are untrusted. Parsing and
+     validation run on the main thread for JSON and CSV, so the caps below
+     bound the work, not just the bytes. The record cap is the important
+     one: the real form has 332 questions, so a file claiming tens of
+     thousands is not a legitimate assessment.
   ================================================================ */
-  var MAX_XLSX_MB   = 20;
-  var MAX_XLSX_BYTES = MAX_XLSX_MB * 1024 * 1024;
+  var MAX_IMPORT_MB    = 20;
+  var MAX_IMPORT_BYTES = MAX_IMPORT_MB * 1024 * 1024;
+  var MAX_IMPORT_FILES = 25;      /* one group import = a review team, not a crowd */
+  var MAX_IMPORT_RECS  = 2000;    /* ~6x the real question count, generous */
+
+  /* Returns true when the file is small enough to parse; reports and
+     returns false when it is not. */
+  function withinSizeLimit(file) {
+    if (!file || file.size <= MAX_IMPORT_BYTES) return true;
+    setStatus('File too large (' + (file.size / 1048576).toFixed(1) + ' MB). Maximum is '
+              + MAX_IMPORT_MB + ' MB.', 'error');
+    return false;
+  }
+
+  /* ================================================================
+     IMPORT — HECVAT EXCEL (.xlsx)
+     - File size capped by the shared import limit, to block zip bombs
+     - Parsing runs inside a Web Worker (hecvat-worker.js) so a
+       malformed/malicious file cannot crash or exploit the main UI.
+       NOTE: that isolation is best-effort — see the fallback below.
+  ================================================================ */
 
   function importXLSX() {
     openFilePicker('.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', handleXLSXImport);
@@ -2058,13 +2325,10 @@ var HECVAT_SEC = (function () {
   function handleXLSXImport(file) {
     if (!file) return;
 
-    /* ── File size guard ── */
-    if (file.size > MAX_XLSX_BYTES) {
-      setStatus('File too large (' + (file.size / 1048576).toFixed(1) + ' MB). Maximum is ' + MAX_XLSX_MB + ' MB.', 'error');
-      return;
-    }
+    /* ── File size guard (shared with JSON/CSV) ── */
+    if (!withinSizeLimit(file)) return;
 
-    setStatus('Parsing ' + HECVAT_SEC.sanitize(file.name) + '\u2026', 'pending');
+    setStatus('Parsing ' + file.name + '\u2026', 'pending');
 
     var reader = new FileReader();
     reader.onerror = function () { setStatus('Could not read file.', 'error'); };
@@ -2074,17 +2338,12 @@ var HECVAT_SEC = (function () {
       try {
         worker = new Worker('hecvat-worker.js');
       } catch (e) {
-        /* Worker unavailable (e.g. file:// with restrictive browser settings) —
-           fall back to main-thread parsing with the bundled SheetJS             */
-        if (typeof XLSX === 'undefined') {
-          setStatus('XLSX parser unavailable — refresh and try again.', 'error');
-          return;
-        }
-        try {
-          var wb  = XLSX.read(ev.target.result, { type:'array', cellFormula:false, cellHTML:false });
-          var raw = parseXLSXResponses(wb);
-          applyImport(raw, file.name);
-        } catch (err) { setStatus('XLSX error: ' + err.message, 'error'); }
+        /* Construction refused. Browsers block workers on file://, which is
+           the mode the README recommends first, so this is the common path
+           offline rather than an edge case. Parse anyway — breaking import
+           offline is worse — but say so, because the isolation the worker
+           provides is genuinely absent here. */
+        parseXLSXOnMainThread(ev.target.result, file.name, 'nosandbox');
         return;
       }
 
@@ -2104,17 +2363,74 @@ var HECVAT_SEC = (function () {
       };
 
       worker.onerror = function (err) {
+        /* The worker was created but could not run — e.g. its script or the
+           bundled parser could not be fetched. Previously this gave up and
+           the import simply failed; fall back instead, so a working offline
+           copy is never blocked by a worker that cannot start. */
         clearTimeout(timeout);
         worker.terminate();
-        setStatus('Worker error: ' + (err.message || 'unknown'), 'error');
+        parseXLSXOnMainThread(ev.target.result, file.name, 'nosandbox',
+                              err && err.message ? err.message : '');
       };
 
-      /* Transfer the ArrayBuffer to the worker (zero-copy) */
-      var buf = ev.target.result;
-      worker.postMessage(buf, [buf]);
+      /* Send the ArrayBuffer by structured clone, NOT by transfer.
+         Transferring detaches the main thread's copy, and the onerror path
+         above falls back to parsing that same buffer — so a worker that dies
+         after the message was posted would leave the fallback reading a
+         detached buffer and importing nothing, silently. Browsers differ on
+         exactly when the detach becomes observable, which makes that failure
+         intermittent and version-dependent. The copy costs one clone of a
+         file already capped at MAX_IMPORT_MB, which is not worth the risk. */
+      worker.postMessage(ev.target.result);
     };
 
     reader.readAsArrayBuffer(file);
+  }
+
+  /* Have we already explained the missing sandbox this session? */
+  var sandboxWarned = false;
+
+  /* Parse on the main thread. Used whenever the Worker cannot be created or
+     cannot start. Offline use keeps working; the trade-off is stated rather
+     than hidden, because the worker is the only thing standing between a
+     malformed vendor workbook and the page holding the assessment.
+
+     Note there is no Blob-worker middle tier: a worker needs importScripts
+     of the ~280 KB parser, and a file:// page cannot hand it that script for
+     the same origin reason that blocks the worker itself. Where a worker can
+     load at all, the direct path above already works. */
+  function parseXLSXOnMainThread(buffer, fileName, reason, detail) {
+    if (typeof XLSX === 'undefined') {
+      setStatus('The spreadsheet parser did not load. Refresh the page and try again.', 'error');
+      return;
+    }
+    var imported;
+    try {
+      var wb  = XLSX.read(buffer, { type: 'array', cellFormula: false, cellHTML: false });
+      var raw = parseXLSXResponses(wb);
+      imported = applyImport(raw, fileName) === true;
+    } catch (err) {
+      setStatus('That file could not be read as a HECVAT workbook: ' + err.message, 'error');
+      return;
+    }
+    /* Only mention the sandbox when something was actually imported. If
+       applyImport rejected the file or the user cancelled the merge, its own
+       message stands alone rather than being paired with a warning about a
+       import that did not happen. */
+    if (imported && reason === 'nosandbox' && !sandboxWarned) {
+      sandboxWarned = true;
+      showAlert(
+        'Imported, but without the usual sandbox',
+        'Spreadsheets are normally parsed in an isolated worker so a malformed or '
+        + 'hostile file cannot reach the rest of the page. Browsers do not allow that '
+        + 'worker when the tool is opened straight from disk, so this file was read on '
+        + 'the main thread instead. The bundled parser is kept patched, so this is a '
+        + 'reduced safety margin rather than a known hole. If you are ever handed a '
+        + 'workbook you have reason to distrust, open the tool from a web address '
+        + 'instead of a file path and the isolation comes back.'
+        + (detail ? ' (Worker reported: ' + detail + ')' : ''),
+        'warn');
+    }
   }
 
   /* Main-thread fallback parser (mirrors hecvat-worker.js logic) */
@@ -2279,7 +2595,19 @@ var HECVAT_SEC = (function () {
     }).join('\n');
   }
 
-  function applyImport(raw, fileName, rawAE, fileInitials) {
+  function applyImport(raw, fileName, rawAE, fileInitials, skipConfirm) {
+    /* Bound the work before doing any of it. Checked on both maps because a
+       file can carry a small response map and a huge evaluation map. */
+    var rCount  = raw   ? Object.keys(raw).length   : 0;
+    var aeCount = (rawAE && typeof rawAE === 'object' && !Array.isArray(rawAE))
+                    ? Object.keys(rawAE).length : 0;
+    if (rCount > MAX_IMPORT_RECS || aeCount > MAX_IMPORT_RECS) {
+      setStatus('That file claims ' + Math.max(rCount, aeCount) + ' records. The HECVAT has '
+                + HECVAT_QUESTIONS.length + ' questions, so this is not a valid assessment '
+                + 'file and was not imported.', 'error');
+      return false;
+    }
+
     var clean = {}, accepted = 0, dropped = 0;
     Object.keys(raw || {}).forEach(function (qid) {
       var rec = HECVAT_SEC.validateRecord(qid, raw[qid]);
@@ -2296,14 +2624,14 @@ var HECVAT_SEC = (function () {
     }
 
     if (accepted === 0 && aeAccepted === 0) {
-      setStatus('No valid responses or analyst evaluations found in ' + HECVAT_SEC.sanitize(fileName) + '.', 'error');
-      return;
+      setStatus('No valid responses or analyst evaluations found in ' + fileName + '.', 'error');
+      return false;
     }
 
     /* Warn before overwriting existing answers or overrides */
     var existing   = Object.keys(R).filter(function (k) { return R[k] && R[k].value; }).length;
     var existingAE = Object.keys(AE).length;
-    if (existing > 0 || existingAE > 0) {
+    if (!skipConfirm && (existing > 0 || existingAE > 0)) {
       var parts = [];
       if (existing)   parts.push(existing + ' existing answer(s)');
       if (existingAE) parts.push(existingAE + ' existing analyst override(s)');
@@ -2314,7 +2642,7 @@ var HECVAT_SEC = (function () {
         'comments are combined with any you have already entered; blank\n' +
         'fields in the file will NOT erase anything you have already entered.\n\nContinue?'
       );
-      if (!ok) { setStatus('Import cancelled.', ''); return; }
+      if (!ok) { setStatus('Import cancelled.', ''); return false; }
     }
 
     /* Merge, don't clobber. A non-empty imported value wins on conflict, but
@@ -2386,9 +2714,10 @@ var HECVAT_SEC = (function () {
     if (accepted)   parts2.push(accepted + ' response(s)');
     if (aeAccepted) parts2.push(aeAccepted + ' analyst override(s)');
     var skipped = dropped + aeDropped;
-    var msg = 'Imported ' + parts2.join(' and ') + ' from ' + HECVAT_SEC.sanitize(fileName)
+    var msg = 'Imported ' + parts2.join(' and ') + ' from ' + fileName
               + (skipped ? ' \u2014 ' + skipped + ' invalid record(s) skipped.' : '.');
     setStatus(msg, skipped ? 'warn' : 'ok');
+    return true;
   }
 
   /* ================================================================
@@ -2585,30 +2914,41 @@ var HECVAT_SEC = (function () {
 
   /* ================================================================
      EVALUATOR INITIALS
-     Persisted to localStorage so the entry survives a reload without a
-     full save, and also folded into the encrypted save envelope and the
-     export files so the attribution travels with the assessment.
-  ================================================================ */
-  var LS_INITIALS = 'hecvat415_initials';
+     Initials identify the person who made a given judgement about a named
+     vendor, so they are treated as confidential and kept ONLY in memory for
+     the session and inside the AES-256-GCM save envelope alongside the
+     judgements themselves. They are deliberately NOT mirrored to plaintext
+     localStorage: storing the evaluator's identity in the clear while
+     encrypting their findings would leak "who assessed whom" to anyone
+     reading the browser profile.
 
-  function setInitials(value, opts) {
+     Consequence: initials persist across a reload via Restore Snapshot, not
+     automatically. LS_INITIALS is retained only so a value written by an
+     earlier version can be migrated out of cleartext and deleted.
+  ================================================================ */
+  var LS_INITIALS = 'hecvat415_initials';   /* legacy cleartext key — purged on load */
+
+  function setInitials(value) {
     EVAL_INITIALS = sanitizeInitials(value);
     var input = document.getElementById('eval-initials');
     if (input && input.value !== EVAL_INITIALS) input.value = EVAL_INITIALS;
-    if (!opts || opts.persist !== false) {
-      try {
-        if (EVAL_INITIALS) localStorage.setItem(LS_INITIALS, EVAL_INITIALS);
-        else localStorage.removeItem(LS_INITIALS);
-      } catch (e) { /* storage may be unavailable (private mode); non-fatal */ }
-    }
+  }
+
+  /* One-time migration: adopt any cleartext value an earlier version left
+     behind so the user does not lose it mid-session, then remove it from
+     disk. After this runs the key never reappears. */
+  function purgeLegacyInitials() {
+    var legacy = null;
+    try { legacy = localStorage.getItem(LS_INITIALS); } catch (e) { return; }
+    if (legacy === null) return;
+    try { localStorage.removeItem(LS_INITIALS); } catch (e) { /* non-fatal */ }
+    if (legacy && !EVAL_INITIALS) setInitials(legacy);
   }
 
   function wireInitials() {
     var input = document.getElementById('eval-initials');
     if (!input) return;
-    var saved;
-    try { saved = localStorage.getItem(LS_INITIALS); } catch (e) { saved = null; }
-    if (saved) setInitials(saved, { persist: false });
+    purgeLegacyInitials();
     input.addEventListener('input', function () { setInitials(input.value); });
   }
 
@@ -2666,11 +3006,15 @@ var HECVAT_SEC = (function () {
     });
   }
 
-  /* Score a set of questions applying analyst overrides */
-  function scoreQs(qs) {
+  /* Score a set of questions applying analyst overrides.
+     `aeMap` (optional) is the override source — defaults to the live AE
+     table. Pass `{}` to score the vendor's raw self-assessment, or a
+     filtered map (see aeMapForEvaluator) to score one evaluator's view. */
+  function scoreQs(qs, aeMap) {
+    var src = aeMap || AE;
     var earned = 0, pot = 0, comp = 0, nc = 0;
     qs.forEach(function(q) {
-      var ae = AE[q.id] || {};
+      var ae = src[q.id] || {};
       var p  = ae.impOverride
         ? (ae.impOverride === 'Critical Importance' ? 20 : ae.impOverride === 'Minor Importance' ? 5 : 10)
         : pts(q.imp);
@@ -2699,7 +3043,7 @@ var HECVAT_SEC = (function () {
     if (v === 'Yes') { div.className = 'vendor-ans yes';  div.appendChild(txt('\u2713 Yes')); }
     else if (v === 'No')  { div.className = 'vendor-ans no';   div.appendChild(txt('\u2717 No')); }
     else if (v === 'N/A') { div.className = 'vendor-ans na';   div.appendChild(txt('\u2014 N/A')); }
-    else { div.className = 'vendor-ans txt'; div.appendChild(txt(HECVAT_SEC.sanitize(v.length > 100 ? v.slice(0,100)+'\u2026' : v))); }
+    else { div.className = 'vendor-ans txt'; div.appendChild(txt(v.length > 100 ? v.slice(0,100)+'\u2026' : v)); }
     return div;
   }
 
@@ -2774,7 +3118,7 @@ var HECVAT_SEC = (function () {
     if (vN) {
       var vn = mk('div','qguide'); attr(vn,'role','note');
       var vnl = mk('strong'); vnl.appendChild(txt('Vendor notes: ')); vn.appendChild(vnl);
-      vn.appendChild(txt(HECVAT_SEC.sanitize(vN))); L.appendChild(vn);
+      vn.appendChild(txt(vN)); L.appendChild(vn);
     }
     row.appendChild(L);
 
@@ -2990,10 +3334,564 @@ var HECVAT_SEC = (function () {
     renderHighRiskReport();
   }
 
+  /* True when this evaluation panel is the one currently on screen. Eval
+     panels stay in the DOM once built, so without this check a keystroke in
+     the vendor form would rebuild all three tabs' SVGs and appendices. */
+  function evalPanelVisible(evalId) {
+    var p = document.getElementById('panel-' + evalId);
+    return !!(p && p.classList.contains('active'));
+  }
+
   function refreshEvalScorecard(evalId) {
-    if (evalId === 'inst-eval')    { refreshInstScorecard(); refreshCompliancePlotsIfOpen(); }
+    /* Scorecard tables are cheap and feed the printed output, so they always
+       refresh. The SVG/appendix rebuilds below only run for the visible tab. */
+    if (evalId === 'inst-eval')         refreshInstScorecard();
     else if (evalId === 'high-risk')    refreshHighRiskScorecard();
     else if (evalId === 'privacy-eval') refreshPrivacyScorecard();
+    if (!evalPanelVisible(evalId)) return;
+    if (evalId === 'inst-eval') refreshCompliancePlotsIfOpen();
+    refreshRadarIfOpen(evalId);
+    refreshNotesAppendix(evalId);
+  }
+
+  /* ================================================================
+     EVALUATOR RADAR GRAPH
+     One axis per report section. Two polygons:
+       - Vendor self-reported: score % from the vendor's answers alone
+         (no analyst overrides applied).
+       - Evaluator-adjusted: score % after Importance / Compliance
+         overrides — optionally restricted to one evaluator's overrides
+         via the initials filter chips, so a lead analyst can compare how
+         each reviewer graded the vendor against the guidelines.
+     Rendered as inline SVG (no library, CSP script-src 'self') using the
+     shared accessible figure wrapper: caption, zoom, data table, and an
+     SVG <title>/<desc> pair. Polygons differ by dash pattern and marker
+     shape, not colour alone.
+  ================================================================ */
+  var radarFilter = { 'inst-eval': 'all', 'privacy-eval': 'all', 'high-risk': 'all' };
+  var RADAR_SCORE_SERIES = [
+    { key: 'vendor', lbl: 'Vendor self-reported', cls: 'radar-vendor', dash: '7 5', marker: 'square' },
+    { key: 'eval',   lbl: 'Evaluator-adjusted',   cls: 'radar-eval',   dash: '',    marker: 'circle' },
+  ];
+  var RADAR_RISK_SERIES = [
+    { key: 'crit', lbl: 'Critical Importance questions', cls: 'radar-crit', dash: '7 5', marker: 'square' },
+    { key: 'nn',   lbl: 'Non-Negotiable questions',      cls: 'radar-nn',   dash: '',    marker: 'circle' },
+  ];
+  var RADAR_CFG = {
+    'inst-eval': {
+      title: 'Radar Graph — Vendor vs Evaluator Scores',
+      caption: 'Vendor self-reported vs evaluator-adjusted score by report section',
+      intro: 'Each spoke is one report section, scaled 0–100%. The dashed outline is the ' +
+             'score implied by the vendor’s own answers; the solid outline is the score ' +
+             'after evaluator Importance and Compliance overrides. Where the solid shape sits ' +
+             'inside the dashed one, evaluators graded the vendor below its self-assessment. ' +
+             'Sections containing a failed Non-Negotiable are flagged in red. ' +
+             'Use the initials chips to view a single evaluator’s grading.',
+      series: RADAR_SCORE_SERIES, diff: true,
+    },
+    'privacy-eval': null,   /* filled below: same as inst-eval */
+    'high-risk': {
+      title: 'Radar Graph — High-Risk Coverage by Section',
+      caption: 'Critical Importance vs Non-Negotiable score by report section',
+      intro: 'Each spoke is one report section, scaled 0–100%. The dashed outline is the ' +
+             'evaluator-adjusted score on that section’s Critical Importance questions; the ' +
+             'solid outline is the score on the questions evaluators flagged Non-Negotiable. ' +
+             'A section with no flagged questions shows a hollow marker at the hub. Any ' +
+             'section with a failed Non-Negotiable is flagged in red — those are the ' +
+             'dealbreakers to review first. Use the initials chips to see one evaluator’s flags.',
+      series: RADAR_RISK_SERIES, diff: false,
+    },
+  };
+  RADAR_CFG['privacy-eval'] = RADAR_CFG['inst-eval'];
+
+  /* Axes for a given evaluation tab: [{code, label, qs}] */
+  function radarAxes(evalId) {
+    if (evalId === 'privacy-eval') {
+      return PRIV_REPORT_CATS.map(function (cat) { return { code: cat, label: CAT_FULL[cat] || cat, qs: qsByCat(cat) }; });
+    }
+    var axes = INST_REPORT_CATS.map(function (cat) { return { code: cat, label: CAT_FULL[cat] || cat, qs: qsByCat(cat) }; });
+    axes.push({ code: 'AI', label: 'AI (aggregated)',
+      qs: HECVAT_QUESTIONS.filter(function (q) { return q.sections.indexOf('ai') > -1 && q.loc !== 'Not Scored' && q.score !== 'NA'; }) });
+    axes.push({ code: 'PRIV', label: 'Privacy (aggregated)',
+      qs: HECVAT_QUESTIONS.filter(function (q) { return q.sections.indexOf('privacy') > -1 && q.loc !== 'Not Scored' && q.score !== 'NA'; }) });
+    return axes.filter(function (a) { return a.qs.length; });
+  }
+
+  /* Every evaluator whose initials are attached to at least one override. */
+  function collectEvaluatorInitials() {
+    var seen = {};
+    Object.keys(AE).forEach(function (qid) {
+      var by = AE[qid] && AE[qid].by;
+      if (by) Object.keys(by).forEach(function (f) { if (by[f]) seen[by[f]] = true; });
+      var cf = AE[qid] && AE[qid].conflicts;
+      if (cf) Object.keys(cf).forEach(function (f) {
+        (cf[f].entries || []).forEach(function (e) { if (e.by) seen[e.by] = true; });
+      });
+    });
+    return Object.keys(seen).sort();
+  }
+
+  /* Override map containing only the fields a given evaluator authored.
+     Fields with no recorded author are treated as shared and kept. */
+  function aeMapForEvaluator(initials) {
+    if (initials === 'all') return AE;
+    var out = {};
+    Object.keys(AE).forEach(function (qid) {
+      var rec = AE[qid]; if (!rec) return;
+      var by = rec.by || {}, keep = {};
+      ['impOverride', 'compOverride', 'nonNeg', 'analystNotes'].forEach(function (f) {
+        if (rec[f] && (!by[f] || by[f] === initials)) keep[f] = rec[f];
+      });
+      if (Object.keys(keep).length) out[qid] = keep;
+    });
+    return out;
+  }
+
+  /* Effective compliance of one question under a given override map. */
+  function radarStatus(q, aeMap) {
+    var v = R[q.id] && R[q.id].value;
+    if (!v) return 'unanswered';
+    if (v === 'N/A') return 'na';
+    var ae = aeMap[q.id] || {};
+    var ok = ae.compOverride === 'Mark as Compliant' ? true
+           : ae.compOverride === 'Mark as Non-Compliant' ? false
+           : (q.comp ? v === q.comp : v === 'Yes');
+    return ok ? 'compliant' : 'noncompliant';
+  }
+
+  /* One row per axis. `filter` defaults to the tab's live chip selection;
+     exports pass an explicit evaluator so every view can be written out. */
+  function computeRadar(evalId, filter) {
+    var aeMap = aeMapForEvaluator(filter || radarFilter[evalId] || 'all');
+    return radarAxes(evalId).map(function (a) {
+      var overrides = 0, notes = 0, vendorNotes = 0, answered = 0, na = 0,
+          nnFlagged = 0, nnFailed = 0, nnFailedIds = [], nnQs = [];
+      a.qs.forEach(function (q) {
+        var st = radarStatus(q, aeMap);
+        if (st === 'na') na++; else if (st !== 'unanswered') answered++;
+        if (R[q.id] && R[q.id].notes) vendorNotes++;
+        var ae = aeMap[q.id]; if (!ae) return;
+        if (ae.impOverride || ae.compOverride) overrides++;
+        if (ae.analystNotes) notes++;
+        if (ae.nonNeg) {
+          nnFlagged++; nnQs.push(q);
+          if (st === 'noncompliant') { nnFailed++; nnFailedIds.push(q.id); }
+        }
+      });
+      var critQs = a.qs.filter(function (q) { return q.imp === 'Critical Importance'; });
+      return {
+        code: a.code, label: a.label, n: a.qs.length, answered: answered, na: na,
+        unanswered: a.qs.length - answered - na,
+        vendor: scoreQs(a.qs, {}).pct,
+        eval:   scoreQs(a.qs, aeMap).pct,
+        crit:   critQs.length ? scoreQs(critQs, aeMap).pct : null,
+        nn:     nnQs.length   ? scoreQs(nnQs, aeMap).pct   : null,
+        overrides: overrides, notes: notes, vendorNotes: vendorNotes,
+        nnFlagged: nnFlagged, nnFailed: nnFailed, nnFailedIds: nnFailedIds
+      };
+    });
+  }
+
+  /* Radar data for every tab and every evaluator — attached to the JSON
+     export and written as trailing "# Radar" rows in the CSV export so
+     leadership can review the graded picture without re-opening the tool. */
+  function radarExportData() {
+    var evaluators = ['all'].concat(collectEvaluatorInitials());
+    var out = { generated: new Date().toISOString(), evaluators: evaluators.slice(1), tabs: {} };
+    Object.keys(RADAR_CFG).forEach(function (evalId) {
+      out.tabs[evalId] = {};
+      evaluators.forEach(function (ini) {
+        out.tabs[evalId][ini] = computeRadar(evalId, ini).map(function (r) {
+          return { section: r.code, label: r.label, questions: r.n, answered: r.answered, na: r.na,
+                   unanswered: r.unanswered, vendorPct: r.vendor, evaluatorPct: r.eval,
+                   criticalPct: r.crit, nonNegotiablePct: r.nn, overrides: r.overrides,
+                   analystNotes: r.notes, vendorNotes: r.vendorNotes,
+                   nonNegotiablesFlagged: r.nnFlagged, nonNegotiablesFailed: r.nnFailedIds };
+        });
+      });
+    });
+    return out;
+  }
+
+  function buildRadarPanel(evalId) {
+    var sec = mk('div', 'cat-sec');
+    var h3  = mk('h3', 'cat-h3');
+    var togBtn = mk('button', 'cat-tog'); togBtn.type = 'button';
+    togBtn.id = 'radar-tog-' + evalId;
+    var bodyId = 'radar-body-' + evalId;
+    attr(togBtn, 'aria-expanded', 'false');
+    attr(togBtn, 'aria-controls', bodyId);
+    var togLbl = mk('span', 'cat-tog-lbl');
+    var togEmoji = mk('span'); attr(togEmoji, 'aria-hidden', 'true'); togEmoji.appendChild(txt('📡 '));
+    togLbl.appendChild(togEmoji);
+    var cfg = RADAR_CFG[evalId];
+    togLbl.appendChild(txt(cfg.title));
+    togBtn.appendChild(togLbl);
+    var togIcon = mk('span', 'cat-tog-icon'); attr(togIcon, 'aria-hidden', 'true');
+    togIcon.textContent = '▸'; togBtn.appendChild(togIcon);
+    h3.appendChild(togBtn); sec.appendChild(h3);
+
+    var body = mk('div', 'cat-body cat-collapsed plots-body');
+    body.id = bodyId;
+    attr(body, 'role', 'region');
+    attr(body, 'aria-labelledby', togBtn.id);
+
+    var intro = mk('p', 'stat-intro');
+    intro.appendChild(txt(cfg.intro));
+    body.appendChild(intro);
+
+    var chips = mk('div', 'hr-chips radar-chips'); chips.id = 'radar-chips-' + evalId;
+    attr(chips, 'role', 'group'); attr(chips, 'aria-label', 'Filter radar graph by evaluator initials');
+    body.appendChild(chips);
+    chips.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-radarfilter]'); if (!b) return;
+      radarFilter[evalId] = b.getAttribute('data-radarfilter');
+      renderRadar(evalId);
+    });
+
+    var fig = buildPlotFigure({
+      id: 'radar-' + evalId,
+      figCls: 'plot-wrap radar-wrap',
+      caption: cfg.caption,
+      tableLabel: cfg.caption + ', with answered counts, override counts, note counts, and failed non-negotiables for each report section',
+    });
+    var legend = mk('div', 'plot-legend plot-legend-inline');
+    cfg.series.forEach(function (s) {
+      var li = mk('span', 'plot-legend-item');
+      var sw = mk('span', 'plot-legend-sw radar-legend-sw ' + s.cls); attr(sw, 'aria-hidden', 'true');
+      li.appendChild(sw); li.appendChild(txt(s.lbl)); legend.appendChild(li);
+    });
+    var nnLi = mk('span', 'plot-legend-item');
+    var nnSw = mk('span', 'plot-legend-sw radar-legend-sw radar-legend-nnfail'); attr(nnSw, 'aria-hidden', 'true');
+    nnSw.appendChild(txt('!'));
+    nnLi.appendChild(nnSw); nnLi.appendChild(txt('Failed Non-Negotiable in section')); legend.appendChild(nnLi);
+    var ntLi = mk('span', 'plot-legend-item');
+    var ntSw = mk('span', 'plot-legend-sw radar-legend-sw radar-legend-notedot'); attr(ntSw, 'aria-hidden', 'true');
+    ntLi.appendChild(ntSw); ntLi.appendChild(txt('Vendor explained answers in section')); legend.appendChild(ntLi);
+    fig.appendChild(legend);
+    if (evalId === 'high-risk') {
+      /* The list itself is NOT a live region: it is rebuilt wholesale on
+         every chip click and override change, which would make a screen
+         reader re-read every item for a one-item change. A separate
+         sr-only node announces just the summary instead. */
+      var drillStatus = mk('div', 'sr-only'); drillStatus.id = 'radar-high-risk-nnstatus';
+      attr(drillStatus, 'role', 'status'); attr(drillStatus, 'aria-live', 'polite');
+      body.appendChild(drillStatus);
+      var drill = mk('div', 'nn-drill'); drill.id = 'radar-high-risk-nnlist';
+      body.appendChild(drill);
+    }
+    body.insertBefore(fig, body.querySelector('.nn-drill'));
+    sec.appendChild(body);
+
+    togBtn.addEventListener('click', function () {
+      var open = togBtn.getAttribute('aria-expanded') === 'true';
+      attr(togBtn, 'aria-expanded', String(!open));
+      body.classList.toggle('cat-collapsed', open);
+      togIcon.textContent = open ? '▸' : '▾';
+      if (!open) renderRadar(evalId);
+    });
+    return sec;
+  }
+
+  /* ---- (3) Failed non-negotiable drill-down: vendor justification beside
+     the evaluator's notes, so the reviewer sees both at the moment of
+     judgement. Respects the radar's evaluator chip filter. ---- */
+  var lastNNAnnounce = '';
+  function announceNNDrilldown(count, filt) {
+    var node = document.getElementById('radar-high-risk-nnstatus');
+    if (!node) return;
+    var msg = count === 0
+      ? 'No failed non-negotiables' + (filt && filt !== 'all' ? ' flagged by ' + filt : '') + '.'
+      : count + ' failed non-negotiable' + (count === 1 ? '' : 's')
+        + (filt && filt !== 'all' ? ' flagged by ' + filt : '') + '. Details follow in the list below.';
+    /* Only speak when the summary actually changed, so unrelated edits stay silent. */
+    if (msg === lastNNAnnounce) return;
+    lastNNAnnounce = msg;
+    node.replaceChildren(); node.appendChild(txt(msg));
+  }
+
+  function renderNNDrilldown(rows, filt) {
+    var host = document.getElementById('radar-high-risk-nnlist');
+    if (!host) return;
+    host.replaceChildren();
+    var aeMap = aeMapForEvaluator(filt || 'all');
+    var h4 = mk('h4', 'nn-drill-h');
+    h4.appendChild(txt('Failed non-negotiables — vendor justification vs evaluator notes'));
+    host.appendChild(h4);
+    var items = [];
+    rows.forEach(function (r) {
+      r.nnFailedIds.forEach(function (qid) {
+        var q = HECVAT_QUESTIONS.find(function (x) { return x.id === qid; });
+        if (q) items.push({ q: q, section: r.label });
+      });
+    });
+    announceNNDrilldown(items.length, filt);
+    if (!items.length) {
+      var e = mk('p', 'nn-drill-empty');
+      e.appendChild(txt(filt && filt !== 'all' ? 'No failed non-negotiables flagged by ' + filt + '.' : 'No failed non-negotiables.'));
+      host.appendChild(e);
+      return;
+    }
+    var list = mk('ul', 'nn-drill-list');
+    items.forEach(function (it) {
+      var q = it.q, r = R[q.id] || {}, ae = aeMap[q.id] || {}, by = (AE[q.id] && AE[q.id].by) || {};
+      var li = mk('li', 'nn-drill-item');
+      var head = mk('div', 'nn-drill-head');
+      var idS = mk('span', 'hr-qid'); idS.appendChild(txt(q.id)); head.appendChild(idS);
+      var secS = mk('span', 'nn-drill-sec'); secS.appendChild(txt(it.section)); head.appendChild(secS);
+      if (by.nonNeg) { var byS = mk('span', 'hr-by'); attr(byS, 'title', 'Flagged by'); byS.appendChild(txt(by.nonNeg)); head.appendChild(byS); }
+      li.appendChild(head);
+      var qt = mk('div', 'nn-drill-q'); qt.appendChild(txt(q.q)); li.appendChild(qt);
+      var grid = mk('div', 'nn-drill-grid');
+      var vCol = mk('div', 'nn-drill-col nn-drill-vendor');
+      var vh = mk('strong'); vh.appendChild(txt('Vendor answer: ' + (r.value || 'Unanswered')
+        + (q.comp ? ' (expected ' + q.comp + ')' : ''))); vCol.appendChild(vh);
+      var vn = mk('p'); vn.appendChild(txt(r.notes || 'No vendor explanation given.'));
+      if (!r.notes) vn.className = 'nn-drill-none';
+      vCol.appendChild(vn);
+      var eCol = mk('div', 'nn-drill-col nn-drill-eval');
+      var eh = mk('strong'); eh.appendChild(txt('Evaluator notes' + (by.analystNotes ? ' (' + by.analystNotes + ')' : ''))); eCol.appendChild(eh);
+      var en = mk('p'); en.appendChild(txt(ae.analystNotes || 'No evaluator note yet.'));
+      if (!ae.analystNotes) en.className = 'nn-drill-none';
+      eCol.appendChild(en);
+      if (ae.compOverride) { var ov = mk('p', 'nn-drill-ov'); ov.appendChild(txt('Override: ' + ae.compOverride)); eCol.appendChild(ov); }
+      grid.appendChild(vCol); grid.appendChild(eCol); li.appendChild(grid);
+      list.appendChild(li);
+    });
+    host.appendChild(list);
+  }
+
+  /* ---- (4) Vendor notes appendix: every vendor explanation, grouped by
+     report section, at the end of each evaluation. Collapsed on screen,
+     always expanded in print (print CSS expands every .cat-collapsed). ---- */
+  function buildNotesAppendix(evalId) {
+    var sec = mk('div', 'cat-sec notes-appx');
+    var h3 = mk('h3', 'cat-h3');
+    var togBtn = mk('button', 'cat-tog'); togBtn.type = 'button';
+    togBtn.id = 'notes-appx-tog-' + evalId;
+    var bodyId = 'notes-appx-' + evalId;
+    attr(togBtn, 'aria-expanded', 'false'); attr(togBtn, 'aria-controls', bodyId);
+    var lbl = mk('span', 'cat-tog-lbl'); lbl.appendChild(txt('Appendix — Vendor notes by section'));
+    var ct = mk('span', 'cat-ct'); ct.id = 'notes-appx-ct-' + evalId; ct.textContent = '0';
+    var icon = mk('span', 'cat-tog-icon'); attr(icon, 'aria-hidden', 'true'); icon.textContent = '▸';
+    togBtn.appendChild(lbl); togBtn.appendChild(ct); togBtn.appendChild(icon);
+    h3.appendChild(togBtn); sec.appendChild(h3);
+    var body = mk('div', 'cat-body cat-collapsed notes-appx-body'); body.id = bodyId;
+    attr(body, 'role', 'region'); attr(body, 'aria-labelledby', togBtn.id);
+    sec.appendChild(body);
+    togBtn.addEventListener('click', function () {
+      var open = togBtn.getAttribute('aria-expanded') === 'true';
+      attr(togBtn, 'aria-expanded', String(!open));
+      body.classList.toggle('cat-collapsed', open);
+      icon.textContent = open ? '▸' : '▾';
+      if (!open) renderNotesAppendix(evalId);
+    });
+    return sec;
+  }
+
+  function renderNotesAppendix(evalId) {
+    var body = document.getElementById('notes-appx-' + evalId);
+    if (!body) return;
+    body.replaceChildren();
+    var total = 0;
+    radarAxes(evalId).forEach(function (a) {
+      var noted = a.qs.filter(function (q) { return R[q.id] && R[q.id].notes; });
+      if (!noted.length) return;
+      total += noted.length;
+      var h4 = mk('h4', 'notes-appx-sec'); h4.appendChild(txt(a.label + ' (' + a.code + ') — ' + noted.length)); body.appendChild(h4);
+      var dlEl = mk('dl', 'notes-appx-list');
+      noted.forEach(function (q) {
+        var dt = mk('dt');
+        var idS = mk('span', 'hr-qid'); idS.appendChild(txt(q.id)); dt.appendChild(idS);
+        var ans = mk('span', 'vendor-ans-inline'); ans.appendChild(txt(R[q.id].value || 'Unanswered')); dt.appendChild(ans);
+        dt.appendChild(txt(' ' + q.q));
+        var dd = mk('dd'); dd.appendChild(txt(R[q.id].notes));
+        dlEl.appendChild(dt); dlEl.appendChild(dd);
+      });
+      body.appendChild(dlEl);
+    });
+    if (!total) { var e = mk('p', 'nn-drill-empty'); e.appendChild(txt('The vendor has not added notes to any question in these sections.')); body.appendChild(e); }
+    var ct = document.getElementById('notes-appx-ct-' + evalId); if (ct) ct.textContent = String(total);
+  }
+
+  /* Print CSS un-collapses every appendix, but a collapsed one is rendered
+     lazily and would print as an empty heading. Populate all of them just
+     before the print dialog opens, whichever way printing was started. */
+  function renderAllNotesAppendices() {
+    EVAL_SECS.forEach(function (es) { renderNotesAppendix(es.id); });
+  }
+  if (window.matchMedia) {
+    var printMQ = window.matchMedia('print');
+    if (printMQ.addEventListener) printMQ.addEventListener('change', function (e) { if (e.matches) renderAllNotesAppendices(); });
+  }
+  window.addEventListener('beforeprint', renderAllNotesAppendices);
+
+  function refreshNotesAppendix(evalId) {
+    var tog = document.getElementById('notes-appx-tog-' + evalId);
+    if (!tog) return;
+    /* Keep the count badge live; only rebuild the body when it is visible. */
+    var total = 0;
+    radarAxes(evalId).forEach(function (a) { a.qs.forEach(function (q) { if (R[q.id] && R[q.id].notes) total++; }); });
+    var ct = document.getElementById('notes-appx-ct-' + evalId); if (ct) ct.textContent = String(total);
+    if (tog.getAttribute('aria-expanded') === 'true') renderNotesAppendix(evalId);
+  }
+
+  function refreshRadarIfOpen(evalId) {
+    var tog = document.getElementById('radar-tog-' + evalId);
+    if (tog && tog.getAttribute('aria-expanded') === 'true') renderRadar(evalId);
+  }
+
+  function renderRadarChips(evalId) {
+    var chips = document.getElementById('radar-chips-' + evalId);
+    if (!chips) return;
+    var inis = collectEvaluatorInitials();
+    if (radarFilter[evalId] !== 'all' && inis.indexOf(radarFilter[evalId]) === -1) radarFilter[evalId] = 'all';
+    chips.replaceChildren();
+    if (!inis.length) { chips.hidden = true; return; }
+    chips.hidden = false;
+    [['all', 'All evaluators']].concat(inis.map(function (i) { return [i, i]; })).forEach(function (c) {
+      var b = mk('button', 'hr-chip' + (radarFilter[evalId] === c[0] ? ' active' : '')); b.type = 'button';
+      attr(b, 'data-radarfilter', c[0]); attr(b, 'aria-pressed', radarFilter[evalId] === c[0] ? 'true' : 'false');
+      b.appendChild(txt(c[1])); chips.appendChild(b);
+    });
+  }
+
+  function renderRadar(evalId) {
+    var host = document.getElementById('radar-' + evalId);
+    var tblWrap = document.getElementById('radar-' + evalId + '-table-wrap');
+    if (!host) return;
+    renderRadarChips(evalId);
+    var cfg = RADAR_CFG[evalId];
+    var rows = computeRadar(evalId);
+    var filt = radarFilter[evalId] || 'all';
+    var who = filt === 'all' ? '' : ' (' + filt + ')';
+    /* Series labels carry the active evaluator so table headers and the
+       SVG description say whose grading is being shown. */
+    var series = cfg.series.map(function (s) {
+      return { key: s.key, cls: s.cls, dash: s.dash, marker: s.marker,
+               lbl: s.key === 'vendor' ? s.lbl : s.lbl + who };
+    });
+    host.replaceChildren();
+
+    var anyData = rows.some(function (r) { return series.some(function (s) { return r[s.key] !== null; }); });
+    if (!anyData) {
+      var msg = mk('div', 'plot-empty');
+      msg.appendChild(txt(evalId === 'high-risk'
+        ? 'No Critical Importance answers or Non-Negotiable flags scored yet — the radar fills in as responses and flags arrive.'
+        : 'No scored answers yet — the radar fills in as vendor responses arrive.'));
+      host.appendChild(msg);
+      if (tblWrap) tblWrap.replaceChildren();
+      /* Clear any drill-down left from a previous render, so it can never
+         outlive the data it described. */
+      if (evalId === 'high-risk') renderNNDrilldown([], filt);
+      return;
+    }
+
+    var W = 560, H = 560, cx = W / 2, cy = H / 2, Rr = 190, n = rows.length;
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'plot-svg radar-svg', role: 'img', focusable: 'false' });
+    var titleId = 'radar-' + evalId + '-title', descId = 'radar-' + evalId + '-desc';
+    var t = svgEl('title', { id: titleId }); t.appendChild(txt('Radar graph: ' + cfg.caption + who));
+    var failedSecs = rows.filter(function (r) { return r.nnFailed > 0; });
+    var summary = rows.map(function (r) {
+      return r.label + ': ' + series.map(function (s) {
+        return s.lbl + ' ' + (r[s.key] === null ? 'n/a' : r[s.key] + '%');
+      }).join(', ')
+        + (r.vendorNotes ? ', ' + r.vendorNotes + ' vendor note' + (r.vendorNotes === 1 ? '' : 's') : '')
+        + (r.nnFailed ? ', ' + r.nnFailed + ' failed non-negotiable' : '');
+    }).join('; ') + (failedSecs.length
+      ? '. Failed non-negotiables in: ' + failedSecs.map(function (r) { return r.label; }).join(', ') + '.'
+      : '. No failed non-negotiables.');
+    var d = svgEl('desc', { id: descId }); d.appendChild(txt(summary));
+    svg.appendChild(t); svg.appendChild(d);
+    attr(svg, 'aria-labelledby', titleId + ' ' + descId);   /* host div stays unnamed, matching the other plots */
+
+    function pt(i, frac) {
+      var ang = -Math.PI / 2 + (2 * Math.PI * i) / n;
+      return [cx + Rr * frac * Math.cos(ang), cy + Rr * frac * Math.sin(ang)];
+    }
+
+    /* Rings + ring labels */
+    [0.25, 0.5, 0.75, 1].forEach(function (f) {
+      var ring = rows.map(function (_, i) { return pt(i, f).join(','); }).join(' ');
+      svg.appendChild(svgEl('polygon', { points: ring, class: 'radar-grid' }));
+      svg.appendChild(svgText(Math.round(f * 100) + '%', { x: cx + 4, y: cy - Rr * f - 3, class: 'plot-axis-lbl radar-ring-lbl' }));
+    });
+    /* Spokes + axis labels. A section with a failed Non-Negotiable gets a
+       thick red spoke, a red "!" badge at the rim, and a red label — three
+       cues, so the flag survives colour-blindness and greyscale print. */
+    rows.forEach(function (r, i) {
+      var p = pt(i, 1), lp = pt(i, 1.13), failed = r.nnFailed > 0;
+      svg.appendChild(svgEl('line', { x1: cx, y1: cy, x2: p[0], y2: p[1],
+                                      class: 'radar-axis' + (failed ? ' radar-axis-nnfail' : '') }));
+      var anchor = Math.abs(lp[0] - cx) < 8 ? 'middle' : lp[0] < cx ? 'end' : 'start';
+      var lab = svgText((failed ? '! ' : '') + r.code,
+        { x: lp[0], y: lp[1] + 4, 'text-anchor': anchor, class: 'plot-axis-title radar-lbl' + (failed ? ' radar-lbl-nnfail' : '') });
+      var lt = svgEl('title'); lt.appendChild(txt(r.label + (failed ? ' — ' + r.nnFailed + ' failed non-negotiable: ' + r.nnFailedIds.join(', ') : ''))); lab.appendChild(lt);
+      svg.appendChild(lab);
+      if (failed) {
+        var bp = pt(i, 1.04);
+        svg.appendChild(svgEl('circle', { cx: bp[0], cy: bp[1], r: 8, class: 'radar-nnfail-badge' }));
+        svg.appendChild(svgText('!', { x: bp[0], y: bp[1] + 4, 'text-anchor': 'middle', class: 'radar-nnfail-badge-txt' }));
+      }
+    });
+    /* Series polygons (first series drawn first so the second sits on top).
+       Axes with no scorable data (pct === null) are left OUT of the
+       polygon and get a hollow "no data" marker at the hub instead, so a
+       real 0% and a missing score never look the same. */
+    series.forEach(function (s, si) {
+      var polyPts = [];
+      rows.forEach(function (r, i) { if (r[s.key] !== null) polyPts.push(pt(i, r[s.key] / 100)); });
+      if (polyPts.length >= 2) {
+        var polyAttrs = { points: polyPts.map(function (p) { return p.join(','); }).join(' '),
+                          class: 'radar-poly ' + s.cls };
+        if (s.dash) polyAttrs['stroke-dasharray'] = s.dash;   /* svgEl sets SVG presentation attrs directly */
+        svg.appendChild(svgEl('polygon', polyAttrs));
+      }
+      rows.forEach(function (r, i) {
+        var val = r[s.key], m;
+        if (val === null) {
+          var hub = pt(i, 0.04);
+          m = svgEl('path', { d: 'M' + (hub[0] - 4) + ',' + (hub[1] - 4) + ' l8,8 m0,-8 l-8,8',
+                              class: 'radar-marker radar-nodata ' + s.cls });
+        } else {
+          var p = pt(i, val / 100);
+          m = s.marker === 'square'
+            ? svgEl('rect', { x: p[0] - 4, y: p[1] - 4, width: 8, height: 8, class: 'radar-marker ' + s.cls })
+            : svgEl('circle', { cx: p[0], cy: p[1], r: 4.5, class: 'radar-marker ' + s.cls });
+        }
+        var mt = svgEl('title');
+        mt.appendChild(txt(r.label + ' — ' + s.lbl + ': ' + (val === null ? 'no scorable data' : val + '%')));
+        m.appendChild(mt); svg.appendChild(m);
+        /* Note-backed marker: a centre dot on the first series' marker when
+           the vendor explained at least one answer in this section. */
+        if (si === 0 && val !== null && r.vendorNotes > 0) {
+          var p2 = pt(i, val / 100);
+          var dot = svgEl('circle', { cx: p2[0], cy: p2[1], r: 2, class: 'radar-note-dot' });
+          var dt2 = svgEl('title'); dt2.appendChild(txt(r.label + ': ' + r.vendorNotes + ' vendor note(s)')); dot.appendChild(dt2);
+          svg.appendChild(dot);
+        }
+      });
+    });
+    host.appendChild(svg);
+    if (evalId === 'high-risk') renderNNDrilldown(rows, filt);
+
+    if (tblWrap) {
+      var headers = ['Report section', 'Questions', 'Answered', 'N/A', 'Blank']
+        .concat(series.map(function (s) { return s.lbl + ' %'; }))
+        .concat(cfg.diff ? ['Difference'] : [])
+        .concat(['Overrides', 'Analyst notes', 'Vendor notes', 'Non-negotiables flagged', 'Non-negotiables failed']);
+      buildPlotDataTable(tblWrap, cfg.caption + who, headers,
+        rows.map(function (r) {
+          var cells = [r.label + ' (' + r.code + ')', r.n, r.answered, r.na, r.unanswered]
+            .concat(series.map(function (s) { return r[s.key] === null ? 'n/a' : r[s.key] + '%'; }));
+          if (cfg.diff) {
+            cells.push((r.vendor === null || r.eval === null) ? 'n/a'
+              : ((r.eval - r.vendor > 0 ? '+' : '') + (r.eval - r.vendor)));
+          }
+          return cells.concat([r.overrides, r.notes, r.vendorNotes, r.nnFlagged,
+            r.nnFailed ? r.nnFailed + ' (' + r.nnFailedIds.join(', ') + ')' : 0]);
+        }));
+    }
   }
 
   /* Only re-render plots if their panel is currently expanded, to avoid
@@ -4147,6 +5045,18 @@ var HECVAT_SEC = (function () {
 
       var body = mk('div','sec-body');
 
+      /* Print-only confidentiality banner. Hidden on screen; the print
+         stylesheet reveals it, so a PDF or paper copy of an analyst tab can
+         never be mistaken for the vendor-facing document. */
+      var prtWarn = mk('div','eval-print-warning');
+      var pwT = mk('strong'); pwT.appendChild(txt('INTERNAL \u2014 ANALYST USE ONLY. DO NOT SEND TO THE VENDOR.'));
+      prtWarn.appendChild(pwT);
+      prtWarn.appendChild(txt(
+        ' This page is the institution\u2019s evaluation. It contains analyst judgements, '
+        + 'importance and compliance overrides, non-negotiable flags and internal notes. '
+        + 'The vendor-facing document is the Excel workbook produced by Export HECVAT.'));
+      body.appendChild(prtWarn);
+
       /* Instructions */
       var inst = mk('div','eval-instructions'); attr(inst,'role','note');
       var instLines = {
@@ -4171,6 +5081,9 @@ var HECVAT_SEC = (function () {
       /* ── INSTITUTION EVALUATION ── */
       if (es.id === 'inst-eval') {
         body.appendChild(mkScorecardTable('inst-eval','Institution Evaluation Report Sections'));
+
+        /* Radar graph: vendor self-reported vs evaluator-adjusted, per section */
+        body.appendChild(buildRadarPanel('inst-eval'));
 
         /* Visual compliance plots — collapsible, collapsed by default */
         body.appendChild(buildCompliancePlots());
@@ -4226,6 +5139,7 @@ var HECVAT_SEC = (function () {
         body.appendChild(nnBanner);
 
         body.appendChild(mkScorecardTable('high-risk','High-Risk Evaluation Report'));
+        body.appendChild(buildRadarPanel('high-risk'));
         body.appendChild(buildHighRiskLists());
         body.appendChild(buildHighRiskReport());
       }
@@ -4233,6 +5147,7 @@ var HECVAT_SEC = (function () {
       /* ── PRIVACY ANALYST EVALUATION ── */
       else if (es.id === 'privacy-eval') {
         body.appendChild(mkScorecardTable('privacy-eval','Privacy Analyst Evaluation Report Sections'));
+        body.appendChild(buildRadarPanel('privacy-eval'));
 
         PRIV_REPORT_CATS.forEach(function(cat) {
           var qs = qsByCat(cat);
@@ -4243,6 +5158,7 @@ var HECVAT_SEC = (function () {
         });
       }
 
+      body.appendChild(buildNotesAppendix(es.id));
       panel.appendChild(body);
       main.appendChild(panel);
       refreshEvalScorecard(es.id);
@@ -4358,6 +5274,8 @@ var HECVAT_SEC = (function () {
   wireSidebarButtons();
   wireInitials();
   refreshProgress();
+  /* Last, so the alert lands on a built page rather than racing the UI. */
+  offerSnapshotRestore();
 
   /* ================================================================
      ACCESSIBILITY CONTROLS: DARK MODE + FONT SIZE

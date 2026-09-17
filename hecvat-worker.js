@@ -1,6 +1,12 @@
 /* hecvat-worker.js — HECVAT XLSX import worker
    Runs SheetJS in an isolated thread so a malformed/malicious
    xlsx cannot crash or exploit the main UI thread.
+   NOTE: this isolation is best-effort. hecvat-app.js falls back to
+   parsing on the MAIN thread when a Worker cannot be constructed
+   (browsers block workers on file://) AND when a constructed worker
+   fails to start. Either way the user is told the sandbox is absent.
+   The parser must therefore be kept patched in its own right — see
+   README, bundled-libraries section.
    Loaded as: new Worker('hecvat-worker.js')                   */
 'use strict';
 
